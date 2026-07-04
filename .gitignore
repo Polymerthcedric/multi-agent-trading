@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.log
+.env
+venv/
+.venv/
+logs/
+*.egg-info/
+.streamlit/
+dashboard_stderr.txt
+dashboard_stdout.txt
+.DS_Store
+.pytest_cache/

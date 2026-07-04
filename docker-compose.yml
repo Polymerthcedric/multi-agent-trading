@@ -1,0 +1,12 @@
+services:
+  trading-bot:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      - EXCHANGE_API_KEY=${EXCHANGE_API_KEY:-placeholder_key}
+      - EXCHANGE_SECRET=${EXCHANGE_SECRET:-placeholder_secret}
+      - EXCHANGE_PASSPHRASE=${EXCHANGE_PASSPHRASE:-}
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
