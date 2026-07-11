@@ -21,7 +21,7 @@ class VolatilityResult:
 class VolatilityAgent:
     name: str = "volatility_agent"
 
-    def __init__(self, lookback: int = 14) -> None:
+    def __init__(self, lookback: int = 20) -> None:
         self._lookback = lookback
         self._price_history: List[float] = []
         self._low_vol_threshold = 0.15
@@ -31,12 +31,13 @@ class VolatilityAgent:
         price = market_data.get("price", 0.0)
         high = market_data.get("high", price * 1.01)
         low = market_data.get("low", price * 0.99)
+        atr_from_data = market_data.get("atr", 0.0)
 
         self._price_history.append(price)
         if len(self._price_history) > self._lookback:
             self._price_history.pop(0)
 
-        atr = high - low
+        atr = atr_from_data if atr_from_data > 0 else (high - low)
         if len(self._price_history) >= 2:
             prev = self._price_history[-2]
             atr = max(atr, abs(high - prev), abs(low - prev))
@@ -47,22 +48,24 @@ class VolatilityAgent:
             returns = [
                 (self._price_history[i] - self._price_history[i - 1]) / self._price_history[i - 1]
                 for i in range(1, len(self._price_history))
+                if self._price_history[i - 1] > 0
             ]
-            mean_ret = sum(returns) / len(returns)
-            variance = sum((r - mean_ret) ** 2 for r in returns) / len(returns)
-            std_ret = variance ** 0.5
-            iv = std_ret * (252 ** 0.5)
-            if len(returns) > 1:
-                z_score = (returns[-1] - mean_ret) / std_ret
+            if returns:
+                mean_ret = sum(returns) / len(returns)
+                variance = sum((r - mean_ret) ** 2 for r in returns) / len(returns)
+                std_ret = variance ** 0.5
+                iv = std_ret * (252 ** 0.5)
+                if std_ret > 0 and len(returns) > 1:
+                    z_score = (returns[-1] - mean_ret) / std_ret
         else:
             iv = 0.20
 
-        if z_score > 1.5:
+        if iv > self._high_vol_threshold or z_score > 1.5:
             volatility_regime = "high_vol_chaos"
-            risk_multiplier = max(0.3, 1.0 - abs(z_score) * 0.15)
-        elif z_score < -0.5:
+            risk_multiplier = max(0.3, 1.0 - abs(z_score) * 0.12)
+        elif iv < self._low_vol_threshold and z_score < -0.5:
             volatility_regime = "low_vol_trend"
-            risk_multiplier = min(1.5, 1.0 + abs(z_score) * 0.10)
+            risk_multiplier = min(1.5, 1.0 + abs(z_score) * 0.08)
         else:
             volatility_regime = "mean_reverting"
             risk_multiplier = 1.0
@@ -79,8 +82,8 @@ class VolatilityAgent:
         }
 
         logger.info(
-            "VolatilityAgent | atr=%.4f iv=%.4f regime=%s multiplier=%.4f reasoning=%s",
-            atr, iv, volatility_regime, risk_multiplier, reasoning,
+            "VolatilityAgent | atr=%.4f iv=%.4f regime=%s z=%.2f multiplier=%.4f",
+            atr, iv, volatility_regime, z_score, risk_multiplier,
         )
 
         return VolatilityResult(

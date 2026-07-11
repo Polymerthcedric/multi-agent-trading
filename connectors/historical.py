@@ -9,9 +9,10 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 YF_MAP: Dict[str, str] = {
-    "BTC/USD": "BTC-USD", "ETH/USD": "ETH-USD", "SOL/USD": "SOL-USD",
-    "GOLD/USD": "GC=F", "EUR/USD": "EURUSD=X", "GBP/USD": "GBPUSD=X",
-    "USD/JPY": "USDJPY=X", "USD/CHF": "USDCHF=X", "AUD/USD": "AUDUSD=X",
+    "GOLD/USD": "GC=F", "SILVER/USD": "SI=F",
+    "EUR/USD": "EURUSD=X", "GBP/USD": "GBPUSD=X", "USD/JPY": "USDJPY=X",
+    "AAPL": "AAPL", "MSFT": "MSFT", "GOOGL": "GOOGL",
+    "SPY": "SPY", "QQQ": "QQQ",
 }
 
 _MODE_LIVE = "LIVE"
@@ -146,9 +147,10 @@ class HistoricalDataFeed:
     def _synthetic_data(self, symbol: str, days: int) -> List[Dict]:
         import random
         base_prices = {
-            "BTC/USD": 62000, "ETH/USD": 1750, "SOL/USD": 82,
-            "GOLD/USD": 2350, "EUR/USD": 1.14, "GBP/USD": 1.33,
-            "USD/JPY": 161, "USD/CHF": 0.80, "AUD/USD": 0.69,
+            "GOLD/USD": 2350, "SILVER/USD": 28.5,
+            "EUR/USD": 1.14, "GBP/USD": 1.33, "USD/JPY": 161,
+            "AAPL": 195, "MSFT": 420, "GOOGL": 175,
+            "SPY": 520, "QQQ": 450,
         }
         base = base_prices.get(symbol, 100.0)
         bars = []

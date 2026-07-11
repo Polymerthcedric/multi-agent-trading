@@ -38,7 +38,7 @@ def _run_async(coro):
     loop = _get_loop()
     return loop.run_until_complete(coro)
 
-st.set_page_config(page_title="Multi-Agent Trading Dashboard", page_icon="\U0001f4c8", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Multi-Agent Trading Dashboard", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -63,11 +63,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-SYMBOLS = ("BTC/USD", "ETH/USD", "SOL/USD", "GOLD/USD", "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD")
+SYMBOLS = ("GOLD/USD", "SILVER/USD", "EUR/USD", "GBP/USD", "USD/JPY", "AAPL", "MSFT", "GOOGL", "SPY", "QQQ")
 SYMBOL_COLORS = {
-    "BTC/USD": "#f7931a", "ETH/USD": "#627eea", "SOL/USD": "#9945ff",
-    "GOLD/USD": "#ffd700", "EUR/USD": "#005daa", "GBP/USD": "#1b4580",
-    "USD/JPY": "#e60012", "USD/CHF": "#d52b1e", "AUD/USD": "#00843d",
+    "GOLD/USD": "#ffd700", "SILVER/USD": "#c0c0c0",
+    "EUR/USD": "#005daa", "GBP/USD": "#1b4580", "USD/JPY": "#e60012",
+    "AAPL": "#555555", "MSFT": "#00a4ef", "GOOGL": "#4285f4",
+    "SPY": "#ff6600", "QQQ": "#005daa",
 }
 
 @st.cache_resource(ttl=120)
@@ -162,9 +163,11 @@ def render_market_card(sym: str, snap: TVSnapshot, ph: List[float]):
         </div>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:2px; margin-top:6px; font-size:12px;">
             <span>RSI: <b>{snap.rsi:.1f}</b></span>
-            <span>ATR: <b>{snap.atr:.2f}</b></span>
+            <span>ATR: <b>{snap.atr:.4f}</b></span>
             <span>SMA20: <b>${snap.sma20:,.2f}</b></span>
             <span>EMA20: <b>${snap.ema20:,.2f}</b></span>
+            <span>ADX: <b>{snap.adx:.1f}</b></span>
+            <span>MACD: <b>{snap.macd:.4f}</b></span>
         </div>
         <div style="font-size:11px; color:#94a3b8;">TV: ▲{snap.buy_signals} / ▼{snap.sell_signals}</div>
     </div>
@@ -175,7 +178,7 @@ def render_market_card(sym: str, snap: TVSnapshot, ph: List[float]):
         fig.update_layout(height=100, margin=dict(l=0,r=0,t=0,b=0), showlegend=False,
             xaxis_showticklabels=False, yaxis_showticklabels=False, xaxis_showgrid=False, yaxis_showgrid=False,
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(fig, width='stretch', key=f"mc_{sym.replace('/','')}")
+        st.plotly_chart(fig, width='stretch', key=f"mc_{sym.replace('/','').replace('.','')}")
 
 def render_agent_panel(results, search_results):
     sym = st.selectbox("Symbol", SYMBOLS, key="agent_sym")
@@ -275,19 +278,44 @@ def render_historical():
                 st.plotly_chart(fig, width='stretch')
                 st.write(f"Bars: {len(bars)} | Latest: ${bars[-1]['close']:,.2f}")
 
+def render_risk_monitor():
+    st.markdown("### Circuit Breakers")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.metric("Max Daily Loss", "3%", "Halt trading")
+    with c2:
+        st.metric("Max Weekly Loss", "5%", "Extended halt")
+    with c3:
+        st.metric("Kill Switch", "7%", "Full shutdown")
+    with c4:
+        st.metric("Max Trades/Day", "15", "Limit reached = HOLD")
+
+    st.markdown("### Risk Parameters")
+    st.markdown("""
+    | Parameter | Value | Description |
+    |-----------|-------|-------------|
+    | Min Confidence | 0.55 | Below this = HOLD |
+    | Max Allocation | 20% | Per asset |
+    | Trailing Stop | 2% | Below fill price |
+    | Max Risk/Trade | 1.5% | Of portfolio |
+    | Kelly Fraction | 0.25-0.50 | Position sizing |
+    """)
+
 def main():
     feed = init_feed()
     if not feed.is_available():
         st.error("tradingview_ta not installed. Run: pip install tradingview-ta"); st.stop()
 
-    st.sidebar.title("\U0001f4ca Multi-Agent Trading")
+    st.sidebar.title("Multi-Agent Trading")
     st.sidebar.markdown("---")
     auto = st.sidebar.checkbox("Auto-refresh (30s)", value=True)
-    go_btn = st.sidebar.button("\U0001f504 Refresh Now", type="primary", use_container_width=True)
-    st.sidebar.markdown("### Markets")
-    st.sidebar.markdown("\n".join(f"- {s}" for s in SYMBOLS[:3]))
-    st.sidebar.markdown("\n".join(f"- {s}" for s in SYMBOLS[3:6]))
-    st.sidebar.markdown("\n".join(f"- {s}" for s in SYMBOLS[6:]))
+    go_btn = st.sidebar.button("Refresh Now", type="primary", use_container_width=True)
+    st.sidebar.markdown("### Commodities")
+    st.sidebar.markdown("- GOLD/USD\n- SILVER/USD")
+    st.sidebar.markdown("### Forex")
+    st.sidebar.markdown("- EUR/USD\n- GBP/USD\n- USD/JPY")
+    st.sidebar.markdown("### Stocks & ETFs")
+    st.sidebar.markdown("- AAPL\n- MSFT\n- GOOGL\n- SPY\n- QQQ")
     st.sidebar.markdown("---")
     st.sidebar.markdown("### Search Engine Config")
     sd = st.sidebar.slider("Search Depth", 2, 10, 5, key="search_depth")
@@ -317,7 +345,7 @@ def main():
     st.markdown(f"<div style='display:flex;justify-content:space-between;color:#94a3b8;margin-bottom:8px;'>"
         f"<span>Updated: {last}</span><span>TV (1h) | Paper: ${bal.total_equity:,.2f}</span></div>", unsafe_allow_html=True)
 
-    t_market, t_agents, t_portfolio, t_hist = st.tabs(["\U0001f4ca Market","\U0001f916 Agents + Search","\U0001f4bc Portfolio","\U0001f4c5 Backtest"])
+    t_market, t_agents, t_portfolio, t_hist, t_risk = st.tabs(["Market", "Agents + Search", "Portfolio", "Backtest", "Risk Monitor"])
 
     with t_market:
         cols = st.columns(3)
@@ -329,7 +357,7 @@ def main():
         rows = []
         for sym in SYMBOLS:
             s = st.session_state.snapshots.get(sym)
-            if s: rows.append({"Symbol": sym, "Price": s.price, "RSI": s.rsi, "Rec": s.recommendation})
+            if s: rows.append({"Symbol": sym, "Price": s.price, "RSI": s.rsi, "ADX": s.adx, "Rec": s.recommendation})
         if rows:
             df = pd.DataFrame(rows)
             fig = px.bar(df, x="Symbol", y="Price", color="Symbol",
@@ -346,23 +374,25 @@ def main():
     with t_hist:
         render_historical()
 
+    with t_risk:
+        render_risk_monitor()
+
     wd = init_watchdog()
     wd_sum = wd.summary()
     if wd_sum["critical"]:
-        st.sidebar.warning("\u26a0\ufe0f Data Quality Alert: {}/{} sources failing".format(
+        st.sidebar.warning("Data Quality Alert: {}/{} sources failing".format(
             wd_sum["sources_failing"], wd_sum["sources_monitored"]))
     else:
-        st.sidebar.info("\u2705 Data Quality OK ({}/{} sources)".format(
+        st.sidebar.info("Data Quality OK ({}/{} sources)".format(
             wd_sum["sources_monitored"] - wd_sum["sources_failing"], wd_sum["sources_monitored"]))
 
     st.sidebar.markdown("### Self-Learning")
-    st.sidebar.caption("\u26d4 PPO scaffold — not yet learning (placeholder)")
-    st.sidebar.caption("See `agents/self_learner.py`")
+    st.sidebar.caption("Feedback loop active — params auto-tune every 25 trades")
+    st.sidebar.caption("See `engine/self_learner.py`")
 
     st.sidebar.markdown("---")
-    st.sidebar.caption("Multi-Agent Trading Framework v2")
+    st.sidebar.caption("Multi-Agent Trading Framework v3")
     st.sidebar.markdown("[Fidel Cedric Odoyo](https://github.com/Polymerthcedric)")
-    st.sidebar.markdown("[LinkedIn](https://linkedin.com/in/fidel-odoyo) · [Certifications](https://linkedin.com/in/fidel-odoyo/details/certifications)")
 
 if __name__ == "__main__":
     main()

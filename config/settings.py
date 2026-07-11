@@ -31,14 +31,22 @@ class Settings:
     log_file: str = "trading_bot.log"
 
     simulation_tick_interval_sec: float = 1.0
-    max_daily_trades: int = 10
+    max_daily_trades: int = 20
 
     symbols: Tuple[str, ...] = field(default_factory=lambda: (
-        "BTC/USD", "ETH/USD", "SOL/USD",
-        "GOLD/USD", "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD",
+        "GOLD/USD", "SILVER/USD",
+        "EUR/USD", "GBP/USD", "USD/JPY",
+        "AAPL", "MSFT", "GOOGL",
+        "SPY", "QQQ",
     ))
 
-    max_daily_drawdown_pct: float = 0.02
-    max_position_size_pct: float = 0.25
-    max_risk_per_trade_pct: float = 0.02
-    learning_cadence_trades: int = 50
+    max_daily_drawdown_pct: float = 0.03
+    max_position_size_pct: float = 0.20
+    max_risk_per_trade_pct: float = 0.015
+    learning_cadence_trades: int = 25
+
+    max_daily_loss_pct: float = 0.03
+    max_weekly_loss_pct: float = 0.05
+    max_drawdown_halt_pct: float = 0.07
+    max_trades_per_day: int = 15
+    min_risk_reward_ratio: float = 1.5

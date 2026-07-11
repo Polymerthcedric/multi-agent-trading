@@ -1,174 +1,221 @@
 # Multi-Agent Trading Framework
 
-Autonomous multi-agent trading system with MCTS look-ahead search, realistic transaction costs, and hard risk guardrails.
+Autonomous multi-agent trading system for **gold, silver, commodities, forex, stocks, and ETFs** with MCTS look-ahead search, TradingView integration, realistic transaction costs, and self-learning feedback loops.
 
 **Built by [Fidel Cedric Odoyo](https://github.com/Polymerthcedric)**
 - Portfolio: [polymerthcedric.github.io/portfolio](https://polymerthcedric.github.io/portfolio)
 - LinkedIn: [linkedin.com/in/fidel-odoyo](https://linkedin.com/in/fidel-odoyo)
-- Certifications: [linkedin.com/in/fidel-odoyo/details/certifications](https://linkedin.com/in/fidel-odoyo/details/certifications)
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│                   Market Data                    │
-│   TradingView · IBKR · yfinance                 │
-└──────────────────────┬──────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                     Market Data Layer                     │
+│    TradingView (live) · IBKR · yfinance · Webhooks        │
+└────────────────────────┬─────────────────────────────────┘
+                         │
+┌────────────────────────▼─────────────────────────────────┐
+│                   Agent Pipeline                          │
+│  ┌────────────┐  ┌──────────┐  ┌──────────────┐          │
+│  │ Predictive │  │ Context  │  │  Volatility  │          │
+│  │ RSI+MACD+  │  │ Regime   │  │  ATR+Z-score │          │
+│  │ EMA+ADX+BB │  │ Detection│  │  +IV regimes │          │
+│  └─────┬──────┘  └────┬─────┘  └──────┬───────┘          │
+│        │              │               │                   │
+│  ┌─────▼──────────────▼───────────────▼────────────┐     │
+│  │           Risk Manager (Constitutional)          │     │
+│  │  Circuit Breakers · Kill Switch · Kelly Sizing   │     │
+│  │  Learned params from self-learning feedback      │     │
+│  └───────────────────┬─────────────────────────────┘     │
+│                      │                                    │
+│  ┌───────────────────▼─────────────────────────────┐     │
+│  │          MCTS Search Engine (UCB1)              │     │
+│  │   80+ rollouts · depth=5 · direction tracking   │     │
+│  └───────────────────┬─────────────────────────────┘     │
+└──────────────────────┼───────────────────────────────────┘
                        │
-┌──────────────────────▼──────────────────────────┐
-│               Agent Pipeline                     │
-│  ┌────────────┐ ┌──────────┐ ┌──────────────┐   │
-│  │ Predictive │ │ Context  │ │ Volatility   │   │
-│  │  (trend)   │ │ (regime) │ │  (risk)      │   │
-│  └─────┬──────┘ └────┬─────┘ └──────┬───────┘   │
-│        │             │              │            │
-│  ┌─────▼─────────────▼──────────────▼───────┐   │
-│  │            Risk Manager                  │   │
-│  │      (gatekeeper — immutable caps)       │   │
-│  └─────────────────┬────────────────────────┘   │
-│                    │                             │
-│  ┌─────────────────▼────────────────────────┐   │
-│  │           MCTS Search Engine             │   │
-│  │    UCB1 tree · 80+ rollouts · depth=5    │   │
-│  │    direction-matching accuracy tracked    │   │
-│  └─────────────────┬────────────────────────┘   │
-└────────────────────┼────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────┐
-│       Execution Layer                            │
-│   Paper Trading · IBKR Live/Paper                │
-│   Slippage(2bps)+Spread(1bps)+Commission(0.1%)  │
-└────────────────────┬────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────┐
-│       Ledger + Feedback Loop                     │
-│   Runtime JSON · Trade History · Self-Learning   │
-└─────────────────────────────────────────────────┘
+┌──────────────────────▼───────────────────────────────────┐
+│               Execution Layer                             │
+│   Paper Trading · IBKR · Slippage(2bps) + Spread(1bps)   │
+└──────────────────────┬───────────────────────────────────┘
+                       │
+┌──────────────────────▼───────────────────────────────────┐
+│          Ledger + Self-Learning Feedback                  │
+│   Runtime JSON · Trade History · Auto-tuning params       │
+└──────────────────────┬───────────────────────────────────┘
+                       │
+┌──────────────────────▼───────────────────────────────────┐
+│         TradingView Integration                           │
+│   Pine Script indicators · Webhook alerts · Dashboard     │
+└──────────────────────────────────────────────────────────┘
 ```
+
+## Features
+
+### Multi-Agent Consensus
+- **Predictive Agent** — RSI, MACD, EMA/SMA crossover, ADX trend strength, Bollinger Band position, momentum
+- **Context Agent** — Market regime detection (bullish/bearish/neutral), support/resistance proximity, trend strength
+- **Volatility Agent** — ATR, implied volatility, z-score regimes (high_vol_chaos, low_vol_trend, mean_reverting)
+- **Risk Manager** — Constitutional limits, Kelly criterion sizing, circuit breakers, self-learning parameter tuning
+
+### Circuit Breakers (Industry Standard)
+| Level | Trigger | Action |
+|-------|---------|--------|
+| Level 1 | Daily loss > 3% | Pause trading 12 hours |
+| Level 2 | Weekly loss > 5% | Extended halt |
+| Level 3 | Drawdown > 7% | **KILL SWITCH** — full shutdown |
+| Level 4 | Trades > 15/day | Block new entries |
+
+### TradingView Integration
+- **Live data feed** via `tradingview_ta` — gold, silver, forex, stocks
+- **Pine Script indicator** — full agent analysis overlay with buy/sell signals
+- **Webhook bridge** (FastAPI) — receives TradingView alerts, routes through agent pipeline
+- **Signal monitor** — real-time web dashboard for incoming signals
+
+### Self-Learning Feedback Loop
+- Performance metrics computed every 25 trades (Sharpe, win rate, profit factor)
+- Confidence threshold auto-adjusts based on win rate
+- Kelly criterion position sizing adapts to recent performance
+- Learned parameters persist to `config/learned_parameters.json` and feed back to risk manager
+
+### MCTS Look-Ahead Search
+- UCB1 tree search with 80+ simulations per symbol
+- Direction-matching accuracy tracked across rollouts
+- Heuristic simulator with RSI mean-reversion and momentum bias
 
 ## Quick Start
 
 ### Local
-
 ```bash
 pip install -r requirements.txt
 
-# Dashboard (browser UI)
+# Dashboard (browser UI at http://localhost:8501)
 streamlit run dashboard.py
 
-# Paper trading with live TV data
+# Paper trading with live TradingView data
 python main.py --tv
+
+# Start webhook receiver (for TradingView alerts)
+python webhook_server.py
 
 # Backtest validation
 python tests/validate_oos.py
 ```
 
 ### Docker
-
 ```bash
 docker compose up --build
 ```
+Exposes port 8501 (dashboard) and port 8000 (webhook receiver).
 
-This starts the Streamlit dashboard at `http://localhost:8501` with all dependencies pre-installed.
+## Tracked Assets
 
-## Features
+| Category | Symbols | Source |
+|----------|---------|--------|
+| **Commodities** | GOLD/USD, SILVER/USD | TradingView (TVC) |
+| **Forex** | EUR/USD, GBP/USD, USD/JPY | TradingView (FX_IDC) |
+| **US Stocks** | AAPL, MSFT, GOOGL | TradingView (NASDAQ) |
+| **ETFs** | SPY, QQQ | TradingView (AMEX/NASDAQ) |
 
-- **4-agent consensus** — predictive (SMA/EMA crossover + RSI), context (regime detection), volatility (z-score regimes), risk manager (immutable guardrails)
-- **MCTS look-ahead search** — UCB1 tree search with 80+ simulations, direction-matching accuracy tracking
-- **Realistic execution** — configurable slippage (2bps), spread (1bps), commission (0.1%) applied to every fill
-- **Data integrity** — LIVE/PAPER mode raises `DataUnavailableError` on missing data; no silent synthetic fallback
-- **Risk guardrails** — 2% max per trade, 2% trailing stop, 5% daily drawdown → 24h lockdown; all constants immutable at runtime
-- **24-dim state vectors** — price, position, cash, RSI, SMA, EMA, ATR, momentum, ADX, volume, order book imbalance, pairs Z-score, volatility index, drawdown, P&L
-- **Comprehensive logging** — every agent's reasoning, fill costs, MCTS metrics logged to JSON ledgers
-- **Out-of-sample validation** — `tests/validate_oos.py` measures Sharpe degradation across train/test splits
-- **IBKR integration** — live/paper execution via `ib_insync` with disconnected-safe mock fallback
-- **Streamlit dashboard** — 4 tabs (Market, Agents+Search, Portfolio, Backtest) with data-quality watchdog
-- **Docker deployment** — one-command setup via `docker compose up`
-- **Hardened codebase** — 50 audit issues resolved across 20 files; 5/5 IBKR kill-switch tests passing
-- **Live data verified** — all 9 symbols return real TradingView prices (BTC, ETH, EURUSD, etc.)
+## TradingView Setup
+
+### 1. Import Pine Script Indicator
+1. Open TradingView → Pine Editor
+2. Paste contents of `pinescript/multi_agent_indicator.pine`
+3. Add to your chart
+4. Configure alerts on the indicator
+
+### 2. Configure Webhook Alerts
+In your Pine Script alert settings:
+- **Webhook URL**: `https://your-server:8000/webhook`
+- **Message template**:
+```json
+{
+  "passphrase": "your-secret-token",
+  "action": "{{strategy.order.action}}",
+  "symbol": "{{ticker}}",
+  "price": {{close}},
+  "volume": {{strategy.order.contracts}},
+  "strategy_id": "multi_agent_v1",
+  "timeframe": "{{interval}}"
+}
+```
+
+### 3. Set Environment Variables
+```bash
+export TRADINGVIEW_WEBHOOK_SECRET="your-secret-token"
+```
 
 ## Project Structure
 
 ```
-├── agents/              # Agent modules (predictive, context, volatility, risk_manager)
-├── config/              # Settings (frozen dataclass)
-├── connectors/          # Data feeds (TradingView, IBKR, yfinance, paper platform)
-├── engine/              # Core engine (state, evaluator, MCTS search tree, environment, watchdog)
-├── execution/           # Broker and search engine orchestration
-├── memory/              # Trade ledger and self-learning critic
-├── tests/               # OOS validation, IBKR kill-switch tests
-├── dashboard.py         # Streamlit UI
-├── main.py              # Orchestration entry point
-├── Dockerfile           # Container build
-├── docker-compose.yml   # Orchestrated deployment
-└── requirements.txt     # Dependencies
+├── agents/                  # Agent modules
+│   ├── predictive.py        # Trend prediction (RSI, MACD, EMA, ADX, BB)
+│   ├── context.py           # Market regime detection
+│   ├── volatility.py        # Volatility analysis and risk scaling
+│   └── risk_manager.py      # Constitutional risk gatekeeper + circuit breakers
+├── config/                  # Configuration
+│   ├── settings.py          # Frozen dataclass settings
+│   └── learned_parameters.json  # Auto-tuned risk parameters
+├── connectors/              # Data feeds and bridges
+│   ├── tv_datafeed.py       # TradingView live data (10 symbols)
+│   ├── platform.py          # Paper/Live exchange connector
+│   ├── ibkr.py              # Interactive Brokers integration
+│   ├── historical.py        # yfinance historical data
+│   └── webhooks/            # TradingView webhook bridge
+│       └── receiver.py      # FastAPI webhook receiver + signal monitor
+├── engine/                  # Core engine
+│   ├── state.py             # 24-dim market state vectors
+│   ├── evaluator.py         # State scoring for MCTS
+│   ├── search_tree.py       # UCB1 Monte Carlo Tree Search
+│   ├── environment.py       # Trading environment simulation
+│   ├── ledger.py            # Runtime JSON ledger
+│   ├── self_learner.py      # PPO/RL scaffold
+│   └── watchdog.py          # Data quality monitoring
+├── execution/               # Order execution
+│   ├── broker.py            # Slippage/spread/commission modeling
+│   └── engine.py            # MCTS search orchestration
+├── memory/                  # Trade recording and learning
+│   └── feedback_loop.py     # Trade ledger + self-learning critic
+├── pinescript/              # TradingView integration
+│   └── multi_agent_indicator.pine  # Full agent overlay indicator
+├── tests/                   # Validation tests
+│   ├── test_ibkr_killswitch.py  # 5 kill-switch safety tests
+│   └── validate_oos.py      # Out-of-sample backtest validation
+├── dashboard.py             # Streamlit dashboard (5 tabs)
+├── main.py                  # Paper trading orchestrator
+├── webhook_server.py        # TradingView webhook bridge server
+├── Dockerfile               # Container build
+├── docker-compose.yml       # Orchestrated deployment
+└── requirements.txt         # Dependencies
 ```
-
-## Hardening Audit
-
-A comprehensive audit resolved **50 issues across 20 files**, covering:
-
-- **Portfolio/state edge cases** — empty portfolios, zero cash, missing positions handled without crashes
-- **MCTS null-safety** — tree search tolerates missing features, empty action sets, failed rollouts
-- **Data validation** — malformed TradingView/yfinance responses caught with descriptive errors
-- **IBKR reliability** — 5 kill-switch tests all passing; connection failures trigger graceful mock fallback
-- **Environment hardening** — watchdog tolerates missing files, runtime JSON corruption, partial initialization
-- **Config immutability** — frozen dataclass prevents runtime tampering of risk limits
-
-```bash
-# Run IBKR kill-switch tests
-pytest tests/ -v
-```
-
-## Docker Deployment
-
-```bash
-# Build and start
-docker compose up --build
-
-# Run in background
-docker compose up -d
-
-# Stop
-docker compose down
-```
-
-The container exposes port 8501 for the Streamlit dashboard. TradingView data flows through without additional setup.
 
 ## Configuration
 
-All risk limits are in `agents/risk_manager.py` as module-level constants. They are **immutable at runtime** — the self-learning loop and dashboard sliders cannot override them.
+### Risk Parameters (Immutable at Runtime)
+All risk limits in `agents/risk_manager.py` as module-level constants:
+- `MAX_RISK_PER_TRADE = 0.015` (1.5% of portfolio)
+- `TRAILING_STOP_LOSS = 0.02` (2% below fill)
+- `DAILY_DRAWDOWN_HALT = 0.03` (3% daily loss → 12h lockdown)
+- `KILL_SWITCH_DRAWDOWN = 0.07` (7% → full halt)
+- `MAX_TRADES_PER_DAY = 15`
 
-Settings are in `config/settings.py` (frozen dataclass).
-
-## Modes
-
-- **DEMO** — allows synthetic data fallback for development
-- **PAPER** — paper trading with real data; raises errors on data failure (default)
-- **LIVE** — same as PAPER but flagged for IBKR live account
-
-## Live Data Verification
-
-All 9 tracked symbols return real TradingView data:
-
-| Symbol | Source | Verified |
-|--------|--------|----------|
-| BTC/USD | TradingView | ✓ |
-| ETH/USD | TradingView | ✓ |
-| EUR/USD | TradingView | ✓ |
-| GBP/USD | TradingView | ✓ |
-| AAPL | TradingView | ✓ |
-| MSFT | TradingView | ✓ |
-| GOOGL | TradingView | ✓ |
-| TSLA | TradingView | ✓ |
-| AMZN | TradingView | ✓ |
-
-Run the data scan: `python main.py --tv --scan`
+### Modes
+- **DEMO** — synthetic data fallback for development
+- **PAPER** — real data, simulated execution (default)
+- **LIVE** — same as PAPER but flagged for IBKR live accounts
 
 ## Dependencies
 
 - `numpy`, `pandas` — data processing
-- `tradingview-ta` — free live market data
+- `tradingview-ta` — live market data from TradingView
 - `yfinance` — historical backtesting data
-- `streamlit`, `plotly` — dashboard
-- `ib_insync` — IBKR integration (optional)
+- `streamlit`, `plotly` — interactive dashboard
+- `ib_insync` — Interactive Brokers integration (optional)
+- `fastapi`, `uvicorn` — webhook receiver server
+- `pydantic` — data validation
+- `scipy` — statistical analysis
+
+## License
+
+MIT License — Copyright 2026 Fidel Cedric Odoyo

@@ -3,10 +3,21 @@ services:
     build: .
     ports:
       - "8501:8501"
+      - "8000:8000"
     environment:
       - EXCHANGE_API_KEY=${EXCHANGE_API_KEY:-placeholder_key}
       - EXCHANGE_SECRET=${EXCHANGE_SECRET:-placeholder_secret}
       - EXCHANGE_PASSPHRASE=${EXCHANGE_PASSPHRASE:-}
+      - TRADINGVIEW_WEBHOOK_SECRET=${TRADINGVIEW_WEBHOOK_SECRET:-your-secret-token-here}
+      - WEBHOOK_HOST=0.0.0.0
+      - WEBHOOK_PORT=8000
     volumes:
       - ./logs:/app/logs
+      - ./config:/app/config
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

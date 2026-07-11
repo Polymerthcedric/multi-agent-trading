@@ -18,7 +18,7 @@ from connectors.historical import HistoricalDataFeed
 from engine.evaluator import StateEvaluator
 from engine.state import MarketState
 
-SYMBOLS_TO_TEST = ["BTC/USD", "ETH/USD", "GOLD/USD", "EUR/USD"]
+SYMBOLS_TO_TEST = ["GOLD/USD", "SILVER/USD", "EUR/USD", "AAPL"]
 TRAIN_DAYS = 90
 TEST_DAYS = 30
 SLIPPAGE_BPS = 2.0

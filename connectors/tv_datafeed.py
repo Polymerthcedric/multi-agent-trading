@@ -8,30 +8,30 @@ from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-_SYMBOL_MAP: Dict[str, str] = {
-    "BTC/USD": "BTCUSD", "ETH/USD": "ETHUSD", "SOL/USD": "SOLUSD",
-    "BTC/USDT": "BTCUSDT", "GOLD/USD": "GOLD",
+SYMBOL_MAP: Dict[str, str] = {
+    "GOLD/USD": "GOLD", "SILVER/USD": "SILVER",
     "EUR/USD": "EURUSD", "GBP/USD": "GBPUSD", "USD/JPY": "USDJPY",
-    "USD/CHF": "USDCHF", "AUD/USD": "AUDUSD",
+    "AAPL": "AAPL", "MSFT": "MSFT", "GOOGL": "GOOGL",
+    "SPY": "SPY", "QQQ": "QQQ",
 }
 
-_EXCHANGE_MAP: Dict[str, str] = {
-    "BTC/USD": "BINANCE", "ETH/USD": "BINANCE", "SOL/USD": "BINANCE",
-    "BTC/USDT": "BINANCE", "GOLD/USD": "TVC",
+EXCHANGE_MAP: Dict[str, str] = {
+    "GOLD/USD": "TVC", "SILVER/USD": "TVC",
     "EUR/USD": "FX_IDC", "GBP/USD": "FX_IDC", "USD/JPY": "FX_IDC",
-    "USD/CHF": "FX_IDC", "AUD/USD": "FX_IDC",
+    "AAPL": "NASDAQ", "MSFT": "NASDAQ", "GOOGL": "NASDAQ",
+    "SPY": "AMEX", "QQQ": "NASDAQ",
 }
 
-_SCREENER_MAP: Dict[str, str] = {
-    "BTC/USD": "crypto", "ETH/USD": "crypto", "SOL/USD": "crypto",
-    "BTC/USDT": "crypto", "GOLD/USD": "cfd",
+SCREENER_MAP: Dict[str, str] = {
+    "GOLD/USD": "cfd", "SILVER/USD": "cfd",
     "EUR/USD": "forex", "GBP/USD": "forex", "USD/JPY": "forex",
-    "USD/CHF": "forex", "AUD/USD": "forex",
+    "AAPL": "america", "MSFT": "america", "GOOGL": "america",
+    "SPY": "america", "QQQ": "america",
 }
 
-_DATA_MODE_LIVE = "LIVE"
-_DATA_MODE_PAPER = "PAPER"
-_DATA_MODE_DEMO = "DEMO"
+DATA_MODE_LIVE = "LIVE"
+DATA_MODE_PAPER = "PAPER"
+DATA_MODE_DEMO = "DEMO"
 
 
 @dataclass
@@ -74,10 +74,12 @@ class TradingViewFeed:
     def __init__(
         self,
         symbols: Tuple[str, ...] = (
-            "BTC/USD", "ETH/USD", "SOL/USD",
-            "GOLD/USD", "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD",
+            "GOLD/USD", "SILVER/USD",
+            "EUR/USD", "GBP/USD", "USD/JPY",
+            "AAPL", "MSFT", "GOOGL",
+            "SPY", "QQQ",
         ),
-        mode: str = _DATA_MODE_PAPER,
+        mode: str = DATA_MODE_PAPER,
         max_data_age_seconds: float = 3600.0,
     ) -> None:
         self.symbols = symbols
@@ -100,12 +102,15 @@ class TradingViewFeed:
             logger.error("tradingview_ta not installed. Run: pip install tradingview-ta")
             raise
         for sym in self.symbols:
-            tv_sym = _SYMBOL_MAP.get(sym, sym.replace("/", ""))
-            exchange = _EXCHANGE_MAP.get(sym, "BINANCE")
-            screener = _SCREENER_MAP.get(sym, "crypto")
-            self._handlers[sym] = TA_Handler(
-                symbol=tv_sym, exchange=exchange, screener=screener, interval=Interval.INTERVAL_1_HOUR,
-            )
+            tv_sym = SYMBOL_MAP.get(sym, sym.replace("/", ""))
+            exchange = EXCHANGE_MAP.get(sym, "NASDAQ")
+            screener = SCREENER_MAP.get(sym, "america")
+            try:
+                self._handlers[sym] = TA_Handler(
+                    symbol=tv_sym, exchange=exchange, screener=screener, interval=Interval.INTERVAL_1_HOUR,
+                )
+            except Exception as e:
+                logger.error("Failed to init handler for %s: %s", sym, e)
 
     def is_available(self) -> bool:
         try:
@@ -119,7 +124,6 @@ class TradingViewFeed:
         return self._data_quality_ok
 
     def get_data_quality_report(self) -> Dict:
-        stale = 0
         total = len(self.symbols)
         failures = sum(self._consecutive_failures.get(s, 0) > 2 for s in self.symbols)
         has_cache = sum(1 for s in self.symbols if s in self._cache)
@@ -127,14 +131,14 @@ class TradingViewFeed:
             "mode": self.mode,
             "symbols_total": total,
             "symbols_cached": has_cache,
-            "symbols_stale": stale,
+            "symbols_stale": 0,
             "symbols_failing": failures,
             "data_quality_ok": self._data_quality_ok,
             "backoff_active": sum(1 for v in self._backoff.values() if v > time.time()),
         }
 
     def _is_live_mode(self) -> bool:
-        return self.mode in (_DATA_MODE_LIVE, _DATA_MODE_PAPER)
+        return self.mode in (DATA_MODE_LIVE, DATA_MODE_PAPER)
 
     async def _rate_limit(self, multiplier: float = 1.0) -> None:
         await asyncio.sleep(min(15.0, 0.8 * multiplier))
@@ -149,7 +153,6 @@ class TradingViewFeed:
 
         backoff_until = self._backoff.get(symbol, 0.0)
         if now < backoff_until:
-            logger.debug("TradingViewFeed | backing off %s for %.1fs", symbol, backoff_until - now)
             await asyncio.sleep(min(backoff_until - now, 30.0))
 
         handler = self._handlers.get(symbol)
@@ -173,16 +176,13 @@ class TradingViewFeed:
             elif "429" in err_str:
                 current = self._backoff.get(symbol, 1.0)
                 self._backoff[symbol] = min(current * 2.0, 120.0)
-                logger.warning("TradingViewFeed | rate limited %s, backoff=%.1fs", symbol, self._backoff[symbol])
             else:
                 self._backoff.pop(symbol, None)
 
             if failures >= 3 and self._is_live_mode():
                 self._data_quality_ok = False
                 raise DataUnavailableError(
-                    f"TradingView data unavailable for {symbol} after {failures} failures "
-                    f"[mode={self.mode}]. Live/Paper mode cannot substitute data. "
-                    f"Backoff: {self._backoff.get(symbol, 0):.0f}s"
+                    f"TradingView data unavailable for {symbol} after {failures} failures"
                 )
 
             if symbol in self._cache:
@@ -195,7 +195,7 @@ class TradingViewFeed:
         price = float(inds.get("close", 0.0))
         if price <= 0 and self._is_live_mode():
             self._data_quality_ok = False
-            raise DataUnavailableError(f"TradingView returned zero price for {symbol} [mode={self.mode}]")
+            raise DataUnavailableError(f"TradingView returned zero price for {symbol}")
 
         high = float(inds.get("high", price))
         low = float(inds.get("low", price))
