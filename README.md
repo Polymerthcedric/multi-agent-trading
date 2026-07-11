@@ -148,10 +148,12 @@ Exposes port 8501 (dashboard) and port 8000 (webhook receiver).
 ## WhatsApp Setup (Kenya)
 
 1. Open WhatsApp on your phone
-2. Send message to **+254 798 348 449**
-3. Add your phone number to `.env`:
+2. Save **+34 644 10 55 84** (CallMeBot) in your contacts
+3. Send this exact message: `I allow callmebot to send me messages`
+4. Wait 2-3 minutes for API key reply
+5. Add to `.env`:
    ```
-   WHATSAPP_PHONE=+2547XXXXXXXX
+   WHATSAPP_PHONE=254XXXXXXXXX
    WHATSAPP_API_KEY=your_api_key_here
    ```
 

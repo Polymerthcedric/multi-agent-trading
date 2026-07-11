@@ -3,10 +3,10 @@ WhatsApp Alerts — Kenya Simple Edition
 Uses CallMeBot API (free, no signup, no credit card)
 
 Setup:
-1. Save +254 798 348 449 (CallMeBot) in your phone contacts
-2. Send "I allow callmebot to send me notifications" to that number
+1. Save +34 644 10 55 84 (CallMeBot) in your phone contacts
+2. Send "I allow callmebot to send me messages" to that number
 3. You'll get an API key in reply — put it in .env as WHATSAPP_API_KEY
-4. Set WHATSAPP_PHONE to your number: 254XXXXXXXXX
+4. Set WHATSAPP_PHONE to your number with country code: 254XXXXXXXXX
 """
 from __future__ import annotations
 

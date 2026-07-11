@@ -35,9 +35,9 @@ That's it. Dashboard opens at http://localhost:8501
 
 ## Step 4: WhatsApp Alerts (Optional but Recommended)
 
-1. Save this number in your phone: **+254 798 348 449**
+1. Save this number in your phone: **+34 644 10 55 84** (CallMeBot - Spain)
 2. Open WhatsApp, find "CallMeBot" in your contacts
-3. Send this exact message: `I allow callmebot to send me notifications`
+3. Send this exact message: `I allow callmebot to send me messages`
 4. Wait 2-3 minutes, you'll get an API key as a reply
 5. Edit the `.env` file:
 ```bash
