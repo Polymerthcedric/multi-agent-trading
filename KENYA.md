@@ -1,5 +1,10 @@
 # Kenya Simple Setup Guide
 
+## Live Dashboard (No Setup Required)
+**View the trading bot in action now:** [https://multi-agent-trading-epvurxxuzcdm3j3opza3tu.streamlit.app/](https://multi-agent-trading-epvurxxuzcdm3j3opza3tu.streamlit.app/)
+
+Share this link with anyone. It's always live and updates automatically.
+
 ## What You Need
 - A laptop or desktop computer (or even a phone with Termux)
 - Internet connection

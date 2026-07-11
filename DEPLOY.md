@@ -1,5 +1,8 @@
 # Deployment Guide — Multi-Agent Trading Bot
 
+## Live Dashboard
+**Your trading bot is live:** [https://multi-agent-trading-epvurxxuzcdm3j3opza3tu.streamlit.app/](https://multi-agent-trading-epvurxxuzcdm3j3opza3tu.streamlit.app/)
+
 ## Quick Start (5 minutes)
 
 ### Option A: Local (any machine)

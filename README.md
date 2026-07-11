@@ -1,6 +1,8 @@
 # Multi-Agent Trading Framework
 
-Autonomous multi-agent trading system for **gold, silver, commodities, forex, stocks, and ETFs** with MCTS look-ahead search, TradingView integration, realistic transaction costs, and self-learning feedback loops.
+Autonomous multi-agent trading system for **gold, silver, commodities, forex, stocks, and ETFs** with MCTS look-ahead search, sentiment analysis, bull/bear debate, realistic transaction costs, and self-learning feedback loops.
+
+**Live Dashboard:** [https://multi-agent-trading-epvurxxuzcdm3j3opza3tu.streamlit.app/](https://multi-agent-trading-epvurxxuzcdm3j3opza3tu.streamlit.app/)
 
 **Built by [Fidel Cedric Odoyo](https://github.com/Polymerthcedric)**
 - Portfolio: [polymerthcedric.github.io/portfolio](https://polymerthcedric.github.io/portfolio)
@@ -11,11 +13,11 @@ Autonomous multi-agent trading system for **gold, silver, commodities, forex, st
 ```
 ┌──────────────────────────────────────────────────────────┐
 │                     Market Data Layer                     │
-│    TradingView (live) · IBKR · yfinance · Webhooks        │
+│    yfinance (primary) · TradingView (optional) · Webhooks│
 └────────────────────────┬─────────────────────────────────┘
                          │
 ┌────────────────────────▼─────────────────────────────────┐
-│                   Agent Pipeline                          │
+│                   Agent Pipeline (6 Agents)               │
 │  ┌────────────┐  ┌──────────┐  ┌──────────────┐          │
 │  │ Predictive │  │ Context  │  │  Volatility  │          │
 │  │ RSI+MACD+  │  │ Regime   │  │  ATR+Z-score │          │
@@ -23,6 +25,17 @@ Autonomous multi-agent trading system for **gold, silver, commodities, forex, st
 │  └─────┬──────┘  └────┬─────┘  └──────┬───────┘          │
 │        │              │               │                   │
 │  ┌─────▼──────────────▼───────────────▼────────────┐     │
+│  │         Sentiment Agent (yfinance news)          │     │
+│  │    Keyword scoring · Bullish/Bearish/Neutral     │     │
+│  └───────────────────┬─────────────────────────────┘     │
+│                      │                                    │
+│  ┌───────────────────▼─────────────────────────────┐     │
+│  │      Bull/Bear Debate (TradingAgents-inspired)  │     │
+│  │  Two researchers argue for/against trades        │     │
+│  │  Confidence adjustment based on debate outcome   │     │
+│  └───────────────────┬─────────────────────────────┘     │
+│                      │                                    │
+│  ┌───────────────────▼─────────────────────────────┐     │
 │  │           Risk Manager (Constitutional)          │     │
 │  │  Circuit Breakers · Kill Switch · Kelly Sizing   │     │
 │  │  Learned params from self-learning feedback      │     │
@@ -45,17 +58,19 @@ Autonomous multi-agent trading system for **gold, silver, commodities, forex, st
 └──────────────────────┬───────────────────────────────────┘
                        │
 ┌──────────────────────▼───────────────────────────────────┐
-│         TradingView Integration                           │
-│   Pine Script indicators · Webhook alerts · Dashboard     │
+│         Alerts + Decision Logging                         │
+│   WhatsApp (CallMeBot) · Telegram · Decision Audit Trail  │
 └──────────────────────────────────────────────────────────┘
 ```
 
 ## Features
 
-### Multi-Agent Consensus
+### Multi-Agent Consensus (6 Agents)
 - **Predictive Agent** — RSI, MACD, EMA/SMA crossover, ADX trend strength, Bollinger Band position, momentum
 - **Context Agent** — Market regime detection (bullish/bearish/neutral), support/resistance proximity, trend strength
 - **Volatility Agent** — ATR, implied volatility, z-score regimes (high_vol_chaos, low_vol_trend, mean_reverting)
+- **Sentiment Agent** — Yahoo Finance news analysis with keyword-based bullish/bearish scoring (free, no API key)
+- **Bull/Bear Debate** — Two virtual researchers argue for/against trades, adjusting confidence based on debate outcome
 - **Risk Manager** — Constitutional limits, Kelly criterion sizing, circuit breakers, self-learning parameter tuning
 
 ### Circuit Breakers (Industry Standard)
@@ -66,11 +81,21 @@ Autonomous multi-agent trading system for **gold, silver, commodities, forex, st
 | Level 3 | Drawdown > 7% | **KILL SWITCH** — full shutdown |
 | Level 4 | Trades > 15/day | Block new entries |
 
-### TradingView Integration
-- **Live data feed** via `tradingview_ta` — gold, silver, forex, stocks
-- **Pine Script indicator** — full agent analysis overlay with buy/sell signals
-- **Webhook bridge** (FastAPI) — receives TradingView alerts, routes through agent pipeline
-- **Signal monitor** — real-time web dashboard for incoming signals
+### Decision Reasoning Logger
+Every trade decision includes full reasoning chain:
+- Individual agent outputs and confidence scores
+- Sentiment analysis results
+- Bull/Bear debate arguments and outcome
+- Risk manager decision with circuit breaker status
+- MCTS search results
+
+### Alerts (Free)
+- **WhatsApp** — CallMeBot API (works in Kenya: Safaricom/Airtel/Telkom)
+- **Telegram** — Trade execution, daily summaries, kill switch alerts
+
+### Data Source
+- **yfinance** (primary) — Free, no API key, real-time data for all 10 symbols
+- **TradingView** (optional fallback) — Archived library, rate-limited
 
 ### Self-Learning Feedback Loop
 - Performance metrics computed every 25 trades (Sharpe, win rate, profit factor)
@@ -85,6 +110,12 @@ Autonomous multi-agent trading system for **gold, silver, commodities, forex, st
 
 ## Quick Start
 
+### One-Command (Kenya-friendly)
+```bash
+python start.py
+```
+Automatically installs dependencies, launches dashboard + paper trading.
+
 ### Local
 ```bash
 pip install -r requirements.txt
@@ -92,14 +123,11 @@ pip install -r requirements.txt
 # Dashboard (browser UI at http://localhost:8501)
 streamlit run dashboard.py
 
-# Paper trading with live TradingView data
-python main.py --tv
+# Paper trading with live yfinance data
+python main.py
 
 # Start webhook receiver (for TradingView alerts)
 python webhook_server.py
-
-# Backtest validation
-python tests/validate_oos.py
 ```
 
 ### Docker
@@ -112,39 +140,30 @@ Exposes port 8501 (dashboard) and port 8000 (webhook receiver).
 
 | Category | Symbols | Source |
 |----------|---------|--------|
-| **Commodities** | GOLD/USD, SILVER/USD | TradingView (TVC) |
-| **Forex** | EUR/USD, GBP/USD, USD/JPY | TradingView (FX_IDC) |
-| **US Stocks** | AAPL, MSFT, GOOGL | TradingView (NASDAQ) |
-| **ETFs** | SPY, QQQ | TradingView (AMEX/NASDAQ) |
+| **Commodities** | GOLD/USD, SILVER/USD | yfinance |
+| **Forex** | EUR/USD, GBP/USD, USD/JPY | yfinance |
+| **US Stocks** | AAPL, MSFT, GOOGL | yfinance |
+| **ETFs** | SPY, QQQ | yfinance |
 
-## TradingView Setup
+## WhatsApp Setup (Kenya)
 
-### 1. Import Pine Script Indicator
-1. Open TradingView → Pine Editor
-2. Paste contents of `pinescript/multi_agent_indicator.pine`
-3. Add to your chart
-4. Configure alerts on the indicator
+1. Open WhatsApp on your phone
+2. Send message to **+254 798 348 449**
+3. Add your phone number to `.env`:
+   ```
+   WHATSAPP_PHONE=+2547XXXXXXXX
+   WHATSAPP_API_KEY=your_api_key_here
+   ```
 
-### 2. Configure Webhook Alerts
-In your Pine Script alert settings:
-- **Webhook URL**: `https://your-server:8000/webhook`
-- **Message template**:
-```json
-{
-  "passphrase": "your-secret-token",
-  "action": "{{strategy.order.action}}",
-  "symbol": "{{ticker}}",
-  "price": {{close}},
-  "volume": {{strategy.order.contracts}},
-  "strategy_id": "multi_agent_v1",
-  "timeframe": "{{interval}}"
-}
-```
+## Telegram Setup
 
-### 3. Set Environment Variables
-```bash
-export TRADINGVIEW_WEBHOOK_SECRET="your-secret-token"
-```
+1. Create bot via @BotFather on Telegram
+2. Get your chat ID via @userinfobot
+3. Add to `.env`:
+   ```
+   TELEGRAM_BOT_TOKEN=your_bot_token
+   TELEGRAM_CHAT_ID=your_chat_id
+   ```
 
 ## Project Structure
 
@@ -153,15 +172,18 @@ export TRADINGVIEW_WEBHOOK_SECRET="your-secret-token"
 │   ├── predictive.py        # Trend prediction (RSI, MACD, EMA, ADX, BB)
 │   ├── context.py           # Market regime detection
 │   ├── volatility.py        # Volatility analysis and risk scaling
+│   ├── sentiment.py         # Yahoo Finance news sentiment analysis
+│   ├── debate.py            # Bull/Bear structured debate engine
+│   ├── decision_log.py      # Full decision reasoning audit trail
 │   └── risk_manager.py      # Constitutional risk gatekeeper + circuit breakers
 ├── config/                  # Configuration
 │   ├── settings.py          # Frozen dataclass settings
 │   └── learned_parameters.json  # Auto-tuned risk parameters
 ├── connectors/              # Data feeds and bridges
-│   ├── tv_datafeed.py       # TradingView live data (10 symbols)
+│   ├── tv_datafeed.py       # yfinance primary, TradingView optional fallback
 │   ├── platform.py          # Paper/Live exchange connector
 │   ├── ibkr.py              # Interactive Brokers integration
-│   ├── historical.py        # yfinance historical data
+│   ├── historical.py        # Historical data (xfinance/yfinance)
 │   └── webhooks/            # TradingView webhook bridge
 │       └── receiver.py      # FastAPI webhook receiver + signal monitor
 ├── engine/                  # Core engine
@@ -177,20 +199,54 @@ export TRADINGVIEW_WEBHOOK_SECRET="your-secret-token"
 │   └── engine.py            # MCTS search orchestration
 ├── memory/                  # Trade recording and learning
 │   └── feedback_loop.py     # Trade ledger + self-learning critic
+├── monitoring/              # Alerts and notifications
+│   ├── whatsapp.py          # CallMeBot WhatsApp alerts (Kenya)
+│   ├── telegram.py          # Telegram trade/kill switch alerts
+│   └── __init__.py          # Unified alert dispatcher
 ├── pinescript/              # TradingView integration
 │   └── multi_agent_indicator.pine  # Full agent overlay indicator
 ├── tests/                   # Validation tests
 │   ├── test_ibkr_killswitch.py  # 5 kill-switch safety tests
 │   └── validate_oos.py      # Out-of-sample backtest validation
+├── static/                  # PWA assets
+│   └── manifest.json        # Mobile home-screen install
+├── deploy/                  # Deployment configs
+│   ├── install.sh           # One-click VPS installer
+│   ├── trading-bot.service  # Systemd service
+│   └── cloudflared-config.yml  # Free HTTPS tunnel
 ├── dashboard.py             # Streamlit dashboard (5 tabs)
-├── main.py                  # Paper trading orchestrator
+├── main.py                  # Paper trading orchestrator (6 agents)
+├── start.py                 # One-command Kenya launcher
 ├── webhook_server.py        # TradingView webhook bridge server
 ├── Dockerfile               # Container build
 ├── docker-compose.yml       # Orchestrated deployment
-└── requirements.txt         # Dependencies
+├── .env.example             # Configuration template
+├── requirements.txt         # Dependencies
+├── KENYA.md                 # Kenya-specific setup guide
+└── DEPLOY.md                # Comprehensive deployment guide
 ```
 
 ## Configuration
+
+### Environment Variables (.env)
+```bash
+# Data Source
+DATA_SOURCE=yfinance  # primary (free, no API key)
+
+# WhatsApp (Kenya)
+WHATSAPP_PHONE=+2547XXXXXXXX
+WHATSAPP_API_KEY=your_api_key_here
+
+# Telegram
+TELEGRAM_BOT_TOKEN=your_bot_token
+TELEGRAM_CHAT_ID=your_chat_id
+
+# Trading (optional)
+IBKR_HOST=127.0.0.1
+IBKR_PORT=7497
+IBKR_CLIENT_ID=1
+TRADINGVIEW_WEBHOOK_SECRET=your-secret-token
+```
 
 ### Risk Parameters (Immutable at Runtime)
 All risk limits in `agents/risk_manager.py` as module-level constants:
@@ -205,16 +261,27 @@ All risk limits in `agents/risk_manager.py` as module-level constants:
 - **PAPER** — real data, simulated execution (default)
 - **LIVE** — same as PAPER but flagged for IBKR live accounts
 
+## Deployment
+
+### Free Options (No Credit Card)
+1. **Streamlit Cloud** — Dashboard only (https://share.streamlit.io)
+2. **Ping Africa Cloud** — Full system, M-Pesa payment (Kenya-based)
+
+### Free Tier (Card Required for Verification)
+- **Oracle Cloud** — Always-free VM, 24/7 uptime
+
+See [DEPLOY.md](DEPLOY.md) for comprehensive deployment guide.
+
 ## Dependencies
 
 - `numpy`, `pandas` — data processing
-- `tradingview-ta` — live market data from TradingView
-- `yfinance` — historical backtesting data
+- `yfinance`, `xfinance` — market data (free, no API key)
 - `streamlit`, `plotly` — interactive dashboard
 - `ib_insync` — Interactive Brokers integration (optional)
 - `fastapi`, `uvicorn` — webhook receiver server
 - `pydantic` — data validation
 - `scipy` — statistical analysis
+- `requests` — WhatsApp/Telegram alerts
 
 ## License
 
