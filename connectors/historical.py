@@ -28,17 +28,23 @@ class HistoricalDataFeed:
     def __init__(self, mode: str = _MODE_PAPER) -> None:
         self.mode = mode
         self._cache: Dict[str, List[Dict]] = {}
-        self._yf_available = self._check_yf()
+        self._backend = self._detect_backend()
 
-    def _check_yf(self) -> bool:
+    def _detect_backend(self) -> str:
+        try:
+            import xfinance
+            return "xfinance"
+        except ImportError:
+            pass
         try:
             import yfinance
-            return True
+            return "yfinance"
         except ImportError:
-            return False
+            pass
+        return "synthetic"
 
     def is_available(self) -> bool:
-        return self._yf_available
+        return self._backend in ("xfinance", "yfinance")
 
     def _is_live_or_paper(self) -> bool:
         return self.mode in (_MODE_LIVE, _MODE_PAPER)
@@ -46,36 +52,36 @@ class HistoricalDataFeed:
     def fetch(self, symbol: str, days: int = 90, interval: str = "1h") -> List[Dict[str, float]]:
         cached = self._cache.get(symbol)
         if cached is not None:
-            logger.debug("HistoricalDataFeed | returning %d cached bars for %s", len(cached), symbol)
             return cached
-
-        if not self._yf_available:
-            msg = f"yfinance not installed. Cannot fetch historical data for {symbol} [mode={self.mode}]"
-            if self._is_live_or_paper():
-                raise HistoricalDataError(msg)
-            logger.warning(msg + " — falling back to synthetic (DEMO only)")
-            return self._synthetic_data(symbol, days)
 
         yf_symbol = YF_MAP.get(symbol)
         if not yf_symbol:
-            msg = f"No yfinance mapping for {symbol}"
             if self._is_live_or_paper():
-                raise HistoricalDataError(msg)
-            logger.warning(msg + " — falling back to synthetic (DEMO only)")
+                raise HistoricalDataError(f"No yfinance mapping for {symbol}")
             return self._synthetic_data(symbol, days)
 
-        try:
-            import yfinance as yf
-            ticker = yf.Ticker(yf_symbol)
-            period = f"{days}d"
-            df = ticker.history(period=period, interval=interval)
-            if df.empty:
-                msg = f"yfinance returned empty DataFrame for {symbol} ({yf_symbol})"
-                if self._is_live_or_paper():
-                    raise HistoricalDataError(msg)
-                logger.warning(msg + " — synthetic fallback (DEMO only)")
-                return self._synthetic_data(symbol, days)
+        bars = None
 
+        if self._backend == "xfinance":
+            bars = self._fetch_xfinance(yf_symbol, symbol, days, interval)
+        elif self._backend == "yfinance":
+            bars = self._fetch_yfinance(yf_symbol, symbol, days, interval)
+
+        if bars:
+            self._cache[symbol] = bars
+            return bars
+
+        if self._is_live_or_paper():
+            raise HistoricalDataError(f"Failed to fetch data for {symbol}")
+        return self._synthetic_data(symbol, days)
+
+    def _fetch_xfinance(self, yf_symbol: str, symbol: str, days: int, interval: str) -> Optional[List[Dict]]:
+        try:
+            import xfinance as xf
+            t = xf.Ticker(yf_symbol)
+            df = t.history(period=f"{days}d", interval=interval)
+            if df is None or df.empty:
+                return None
             records = []
             for idx, row in df.iterrows():
                 records.append({
@@ -84,17 +90,32 @@ class HistoricalDataFeed:
                     "low": float(row["Low"]), "close": float(row["Close"]),
                     "volume": float(row["Volume"]),
                 })
-            self._cache[symbol] = records
+            logger.info("xfinance | fetched %d bars for %s (%s)", len(records), symbol, yf_symbol)
+            return records
+        except Exception as e:
+            logger.warning("xfinance fetch failed for %s: %s", symbol, e)
+            return None
+
+    def _fetch_yfinance(self, yf_symbol: str, symbol: str, days: int, interval: str) -> Optional[List[Dict]]:
+        try:
+            import yfinance as yf
+            ticker = yf.Ticker(yf_symbol)
+            df = ticker.history(period=f"{days}d", interval=interval)
+            if df is None or df.empty:
+                return None
+            records = []
+            for idx, row in df.iterrows():
+                records.append({
+                    "timestamp": idx.timestamp() if hasattr(idx, "timestamp") else datetime.now().timestamp(),
+                    "open": float(row["Open"]), "high": float(row["High"]),
+                    "low": float(row["Low"]), "close": float(row["Close"]),
+                    "volume": float(row["Volume"]),
+                })
             logger.info("yfinance | fetched %d bars for %s (%s)", len(records), symbol, yf_symbol)
             return records
-        except HistoricalDataError:
-            raise
         except Exception as e:
-            msg = f"yfinance fetch error for {symbol}: {e}"
-            if self._is_live_or_paper():
-                raise HistoricalDataError(msg) from e
-            logger.warning(msg + " — synthetic fallback (DEMO only)")
-            return self._synthetic_data(symbol, days)
+            logger.warning("yfinance fetch failed for %s: %s", symbol, e)
+            return None
 
     def compute_features(self, bars: List[Dict]) -> Dict[str, np.ndarray]:
         closes = np.array([b["close"] for b in bars], dtype=np.float64)
@@ -126,17 +147,11 @@ class HistoricalDataFeed:
             padded[-len(sma20):] = sma20
             features["sma20"] = padded
 
-        if n >= 2 and n <= 50:
-            vol = np.std(returns) * np.sqrt(252) if len(returns) > 1 else 0.0
-            features["volatility_index"] = np.full(n, vol)
-        elif n > 50:
-            vol_series = np.array([
-                np.std(returns[max(0, i - 20):i + 1]) * np.sqrt(252)
-                for i in range(len(returns))
-            ])
-            padded = np.full(n, 0.2)
-            padded[-len(vol_series):] = vol_series
-            features["volatility_index"] = padded
+        if n >= 2:
+            returns = features.get("returns", np.diff(closes) / closes[:-1])
+            if len(returns) > 1:
+                vol = np.std(returns) * np.sqrt(252)
+                features["volatility_index"] = np.full(n, vol)
 
         features["close"] = closes
         features["high"] = highs

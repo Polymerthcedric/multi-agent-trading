@@ -15,13 +15,13 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-echo "[1/8] Installing system dependencies..."
+echo "[1/7] Installing system dependencies..."
 apt-get update -qq
-apt-get install -y -qq docker.io docker-compose git curl ufw fail2ban > /dev/null 2>&1
+apt-get install -y -qq docker.io docker-compose git curl ufw > /dev/null 2>&1
 systemctl enable docker
 systemctl start docker
 
-echo "[2/8] Configuring firewall..."
+echo "[2/7] Configuring firewall..."
 ufw --force reset > /dev/null 2>&1
 ufw default deny incoming > /dev/null 2>&1
 ufw default allow outgoing > /dev/null 2>&1
@@ -30,7 +30,7 @@ ufw allow 80/tcp > /dev/null 2>&1
 ufw allow 443/tcp > /dev/null 2>&1
 ufw --force enable > /dev/null 2>&1
 
-echo "[3/8] Cloning repository..."
+echo "[3/7] Cloning repository..."
 if [ -d "$INSTALL_DIR" ]; then
     cd "$INSTALL_DIR" && git pull
 else
@@ -38,7 +38,7 @@ else
 fi
 cd "$INSTALL_DIR"
 
-echo "[4/8] Creating environment file..."
+echo "[4/7] Creating environment file..."
 if [ ! -f .env ]; then
     cat > .env << 'ENVEOF'
 # Exchange API Keys
@@ -47,7 +47,11 @@ EXCHANGE_SECRET=your-secret-here
 EXCHANGE_PASSPHRASE=
 
 # TradingView Webhook Secret (change this!)
-TRADINGVIEW_WEBHOOK_SECRET=$(openssl rand -hex 16)
+TRADINGVIEW_WEBHOOK_SECRET=change-me
+
+# WhatsApp Alerts (Kenya-friendly)
+WHATSAPP_API_KEY=
+WHATSAPP_PHONE=254
 
 # Telegram Alerts (optional)
 TELEGRAM_BOT_TOKEN=
@@ -56,8 +60,6 @@ TELEGRAM_CHAT_ID=
 # Dashboard Auth (change these!)
 DASHBOARD_USERNAME=admin
 DASHBOARD_PASSWORD=changeme123
-DASHBOARD_HASH_KEY=$(openssl rand -hex 32)
-DASHBOARD_COOKIE_KEY=$(openssl rand -hex 32)
 
 # Webhook
 WEBHOOK_HOST=0.0.0.0
@@ -70,22 +72,15 @@ else
     echo "  .env already exists, skipping"
 fi
 
-echo "[5/8] Building Docker images..."
+echo "[5/7] Building Docker images..."
 docker compose build --quiet
 
-echo "[6/8] Installing systemd service..."
+echo "[6/7] Installing systemd service..."
 cp deploy/trading-bot.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable trading-bot
 
-echo "[7/8] Installing Cloudflare Tunnel (optional)..."
-if ! command -v cloudflared &> /dev/null; then
-    curl -L --output /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb > /dev/null 2>&1
-    dpkg -i /tmp/cloudflared.deb > /dev/null 2>&1
-fi
-echo "  Cloudflared installed. Run 'cloudflared tunnel login' to authenticate."
-
-echo "[8/8] Starting services..."
+echo "[7/7] Starting services..."
 systemctl start trading-bot
 
 echo ""
@@ -100,11 +95,9 @@ echo ""
 echo "NEXT STEPS:"
 echo "  1. Edit .env:  nano $INSTALL_DIR/.env"
 echo "  2. Restart:    systemctl restart trading-bot"
-echo "  3. Public URL: cloudflared tunnel login && cloudflared tunnel create trading-bot"
-echo "  4. Mobile:     Open dashboard URL → Add to Home Screen"
 echo ""
-echo "Zero-cost public access:"
-echo "  Oracle Cloud ARM Free (24GB RAM forever)"
-echo "  + Cloudflare Tunnel (free HTTPS + DDoS protection)"
-echo "  + Cloudflare Zero Trust (free auth for 50 users)"
+echo "FREE PUBLIC ACCESS OPTIONS:"
+echo "  1. Streamlit Cloud: push to GitHub → share.streamlit.io → deploy"
+echo "  2. Ping Africa: cloud.ping.africa → sign up → deploy (M-Pesa!)"
+echo "  3. Oracle Cloud: cloud.oracle.com/free → ARM instance → free forever"
 echo ""

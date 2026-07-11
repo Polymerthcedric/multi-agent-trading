@@ -20,7 +20,7 @@ from engine.ledger import RuntimeLedger, LedgerEntry
 from memory.feedback_loop import TradeLedger, TradeRecord, SelfLearningCritic
 
 try:
-    from monitoring.telegram import notify_trade, notify_kill_switch, notify_bot_start, notify_error
+    from monitoring import notify_trade, notify_kill_switch, notify_bot_start, notify_error
 except ImportError:
     notify_trade = notify_kill_switch = notify_bot_start = notify_error = None
 

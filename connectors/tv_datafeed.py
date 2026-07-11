@@ -100,7 +100,8 @@ class TradingViewFeed:
             from tradingview_ta import TA_Handler, Interval
         except ImportError:
             logger.error("tradingview_ta not installed. Run: pip install tradingview-ta")
-            raise
+            self._handlers = {}
+            return
         for sym in self.symbols:
             tv_sym = SYMBOL_MAP.get(sym, sym.replace("/", ""))
             exchange = EXCHANGE_MAP.get(sym, "NASDAQ")

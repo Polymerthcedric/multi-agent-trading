@@ -2,7 +2,14 @@
 
 ## Quick Start (5 minutes)
 
-### Option A: Docker (any machine)
+### Option A: Local (any machine)
+```bash
+git clone https://github.com/Polymerthcedric/multi-agent-trading.git
+cd multi-agent-trading
+python3 start.py
+```
+
+### Option B: Docker
 ```bash
 git clone https://github.com/Polymerthcedric/multi-agent-trading.git
 cd multi-agent-trading
@@ -10,65 +17,53 @@ cp .env.example .env  # edit with your keys
 docker compose up -d
 ```
 
-### Option B: One-Click VPS Install
-```bash
-# On an Ubuntu VPS (Oracle Cloud free tier, DigitalOcean, etc.)
-curl -sL https://raw.githubusercontent.com/Polymerthcedric/multi-agent-trading/main/deploy/install.sh | sudo bash
-```
-
 ---
 
-## Get a Public HTTPS Link (Free)
+## Get a Public Link (Free)
 
-### Method 1: Cloudflare Tunnel (Recommended — Zero Cost)
+### Method 1: Streamlit Community Cloud (Easiest — No Credit Card)
 
-1. **Install cloudflared:**
-```bash
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
-chmod +x /usr/local/bin/cloudflared
-```
+1. Push your code to GitHub
+2. Go to https://share.streamlit.io
+3. Sign in with GitHub
+4. Select your repo, set main file to `dashboard.py`
+5. Click Deploy
 
-2. **Authenticate:**
-```bash
-cloudflared tunnel login
-# Opens browser → log in to Cloudflare → pick a domain
-```
+You get a public URL like `https://yourapp.streamlit.app`
 
-3. **Create tunnel:**
-```bash
-cloudflared tunnel create trading-bot
-# Note the tunnel ID from output
-```
+**Free tier:** 1GB RAM, app sleeps after 7 days of inactivity
+**Best for:** Dashboard viewing, no webhook server
 
-4. **Configure DNS:**
-```bash
-cloudflared tunnel route dns trading-bot trading.yourdomain.com
-cloudflared tunnel route dns trading-bot dashboard.yourdomain.com
-```
+### Method 2: Ping Africa Cloud (Kenya-Friendly — No Credit Card)
 
-5. **Run tunnel:**
-```bash
-cloudflared tunnel run --url http://localhost:8000 trading-bot
-```
+1. Go to https://cloud.ping.africa
+2. Sign up with GitHub or .edu email
+3. Get free credits
+4. Deploy as Docker container
+5. Pay with M-Pesa if needed
 
-Now anyone with the link can access:
-- Dashboard: `https://dashboard.yourdomain.com`
-- Webhooks: `https://trading.yourdomain.com`
+**Free tier:** Free credits, M-Pesa available
+**Best for:** Kenya developers, always-on deployment
 
-### Method 2: Tailscale (Private Network)
+### Method 3: Oracle Cloud Free Tier (Most Powerful)
 
-```bash
-curl -fsSL https://tailscale.com/install.sh | sh
-tailscale up
-# Share dashboard at: http://<tailscale-ip>:8501
-```
+1. Go to https://cloud.oracle.com/free
+2. Sign up (requires debit card for identity verification — not charged)
+3. Create an ARM instance: 2 OCPU, 12GB RAM — free forever
+4. SSH in, run the bot
 
-### Method 3: ngrok (Temporary)
+**Free tier:** 2 OCPU, 12GB RAM, 200GB storage — free forever
+**Catch:** Requires credit/debit card for signup
 
-```bash
-ngrok http 8501
-# Copy the https://xxx.ngrok.io link
-```
+### Method 4: Google Cloud Free Tier
+
+1. Go to https://cloud.google.com/free
+2. Sign up (requires credit card for identity verification — not charged)
+3. Create an e2-micro instance (1GB RAM) — free forever
+4. SSH in, run the bot
+
+**Free tier:** 1 shared vCPU, 1GB RAM — free forever
+**Catch:** Only 1GB RAM, requires credit card
 
 ---
 
@@ -81,7 +76,7 @@ ngrok http 8501
 3. Add email verification or one-time PIN
 4. Anyone with the link must authenticate
 
-### Simple HTTP Auth (Docker)
+### Simple HTTP Auth
 
 Already configured via `.env`:
 ```
@@ -91,26 +86,16 @@ DASHBOARD_PASSWORD=your-secure-password
 
 ---
 
-## Mobile Access (PWA)
+## WhatsApp Alerts (Kenya)
 
-The dashboard is a Progressive Web App:
-1. Open dashboard URL on your phone
-2. Tap "Add to Home Screen" (iOS) or "Install" (Android)
-3. Works like a native app, shows trade alerts
-
----
-
-## Telegram Alerts
-
-1. Message [@BotFather](https://t.me/BotFather) → `/newbot`
-2. Copy the bot token
-3. Message [@userinfobot](https://t.me/userinfobot) → get your chat ID
+1. Save +254 798 348 449 (CallMeBot) in your phone contacts
+2. Send `I allow callmebot to send me notifications`
+3. Get API key in reply
 4. Add to `.env`:
 ```
-TELEGRAM_BOT_TOKEN=123456:ABC...
-TELEGRAM_CHAT_ID=987654321
+WHATSAPP_API_KEY=123456
+WHATSAPP_PHONE=254712345678
 ```
-5. Restart: `docker compose restart`
 
 You'll get alerts for:
 - Trade executions
@@ -120,30 +105,32 @@ You'll get alerts for:
 
 ---
 
-## Zero-Cost Always-On Architecture
+## Zero-Cost Architecture Options
 
+### Option 1: Local + Streamlit Cloud (Dashboard Only)
 ```
-┌─────────────────────────────────────────────┐
-│          Oracle Cloud Free Tier              │
-│          (24GB RAM, forever)                 │
-│                                             │
-│  ┌─────────┐  ┌──────────────┐  ┌────────┐ │
-│  │ Streamlit│  │ Webhook Srv  │  │ Bot    │ │
-│  │ :8501   │  │ :8000        │  │ Worker │ │
-│  └────┬────┘  └──────┬───────┘  └────┬───┘ │
-│       └───────────────┴───────────────┘     │
-└───────────────────┬─────────────────────────┘
-                    │
-         Cloudflare Tunnel (free)
-                    │
-            ┌───────┴───────┐
-            │  Public URL   │
-            │  trading.*.com│
-            │  (free HTTPS) │
-            └───────────────┘
+Your Laptop → Streamlit Community Cloud → Public URL
 ```
+- Dashboard: public URL
+- Bot: runs locally
+- Cost: $0
+- Best for: Personal use, testing
 
-**Total cost: $0/month**
+### Option 2: Oracle Cloud Free Tier (Full System)
+```
+Oracle Cloud ARM (12GB RAM) → Cloudflare Tunnel → Public URL
+```
+- Dashboard + Bot + Webhooks: all on Oracle
+- Cost: $0 forever
+- Best for: Always-on, full system
+
+### Option 3: Ping Africa Cloud (Kenya)
+```
+Ping Africa Cloud → Docker → Public URL
+```
+- Dashboard + Bot + Webhooks: all on cloud
+- Cost: Free credits, then M-Pesa
+- Best for: Kenya developers, local support
 
 ---
 
@@ -152,13 +139,14 @@ You'll get alerts for:
 ### Check logs
 ```bash
 docker compose logs -f
-journalctl -u trading-bot -f  # if using systemd
+# Or for local:
+tail -f trading_bot.log
 ```
 
 ### Restart
 ```bash
 docker compose restart
-systemctl restart trading-bot  # if using systemd
+# Or for local: Ctrl+C, then python3 start.py
 ```
 
 ### Kill switch activated
@@ -169,3 +157,11 @@ Reset by deleting the file and restarting.
 ```bash
 curl http://localhost:8000/health
 ```
+
+### yfinance not working
+The bot uses xfinance with automatic failover (Yahoo→Stooq→Binance).
+If one source is down, it falls back automatically. No action needed.
+
+### tradingview-ta archived
+The library still works (v3.3.0) but is no longer maintained.
+The bot handles failures gracefully — cached data is used when API fails.
