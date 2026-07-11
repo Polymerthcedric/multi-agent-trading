@@ -184,13 +184,25 @@ async def get_signals(symbol: Optional[str] = None, limit: int = 50):
     ]
 
 
+_start_time = time.time()
+
+
 @app.get("/health")
 async def health():
+    uptime = time.time() - _start_time
     return {
         "status": "healthy",
-        "uptime": time.time(),
+        "uptime_seconds": round(uptime, 1),
+        "uptime_human": f"{int(uptime // 3600)}h {int((uptime % 3600) // 60)}m",
         "signals_received": len(signal_store.signals),
+        "service": "trading-webhook",
+        "version": "1.0.0",
     }
+
+
+@app.get("/ready")
+async def readiness():
+    return {"status": "ready"}
 
 
 @app.get("/", response_class=HTMLResponse)

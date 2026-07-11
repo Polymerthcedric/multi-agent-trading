@@ -1,0 +1,13 @@
+tunnel: <YOUR_TUNNEL_ID>
+credentials-file: /root/.cloudflared/config.json
+
+ingress:
+  - hostname: trading.yourdomain.com
+    service: http://localhost:8000
+    originRequest:
+      noTLSVerify: false
+  - hostname: dashboard.yourdomain.com
+    service: http://localhost:8501
+      originRequest:
+      noTLSVerify: false
+  - service: http_status:404

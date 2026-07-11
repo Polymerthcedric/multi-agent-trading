@@ -1,14 +1,19 @@
 services:
   trading-bot:
     build: .
+    container_name: trading-bot
     ports:
-      - "8501:8501"
-      - "8000:8000"
+      - "${DASHBOARD_PORT:-8501}:8501"
+      - "${WEBHOOK_PORT:-8000}:8000"
     environment:
       - EXCHANGE_API_KEY=${EXCHANGE_API_KEY:-placeholder_key}
       - EXCHANGE_SECRET=${EXCHANGE_SECRET:-placeholder_secret}
       - EXCHANGE_PASSPHRASE=${EXCHANGE_PASSPHRASE:-}
-      - TRADINGVIEW_WEBHOOK_SECRET=${TRADINGVIEW_WEBHOOK_SECRET:-your-secret-token-here}
+      - TRADINGVIEW_WEBHOOK_SECRET=${TRADINGVIEW_WEBHOOK_SECRET:-change-me}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - DASHBOARD_USERNAME=${DASHBOARD_USERNAME:-admin}
+      - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:-changeme123}
       - WEBHOOK_HOST=0.0.0.0
       - WEBHOOK_PORT=8000
     volumes:
@@ -16,8 +21,18 @@ services:
       - ./config:/app/config
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8501"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

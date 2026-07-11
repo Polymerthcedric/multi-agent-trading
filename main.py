@@ -19,6 +19,11 @@ from engine.environment import TradingEnvironment
 from engine.ledger import RuntimeLedger, LedgerEntry
 from memory.feedback_loop import TradeLedger, TradeRecord, SelfLearningCritic
 
+try:
+    from monitoring.telegram import notify_trade, notify_kill_switch, notify_bot_start, notify_error
+except ImportError:
+    notify_trade = notify_kill_switch = notify_bot_start = notify_error = None
+
 logger = logging.getLogger(__name__)
 
 MAX_CONSECUTIVE_ERRORS = 10
@@ -64,6 +69,12 @@ class TradingOrchestrator:
         self._running = True
         logger.info("Symbols=%s | PaperTrading", self.settings.symbols)
 
+        if notify_bot_start:
+            try:
+                notify_bot_start("PAPER", self.settings.symbols)
+            except Exception:
+                pass
+
         step = 0
         max_steps = self.settings.max_daily_trades * len(self.settings.symbols)
         while self._running and step < max_steps:
@@ -77,6 +88,11 @@ class TradingOrchestrator:
                     self._consecutive_errors += 1
                     if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
                         logger.critical("Too many consecutive errors — stopping")
+                        if notify_kill_switch:
+                            try:
+                                notify_kill_switch("Max consecutive errors", 0.0)
+                            except Exception:
+                                pass
                         self._running = False
                         break
                     await asyncio.sleep(ERROR_BACKOFF_BASE * (2 ** min(self._consecutive_errors, 5)))
@@ -209,6 +225,14 @@ class TradingOrchestrator:
                 agent_confidences={"predictive": prediction.confidence, "context_alignment": 0.0},
                 risk_multiplier=volatility.risk_multiplier,
             ))
+            if notify_trade:
+                try:
+                    notify_trade(
+                        symbol, "BUY", order.avg_fill_price,
+                        decision.allocation_pct, decision.stop_loss,
+                    )
+                except Exception:
+                    pass
 
         if action_label == "SELL":
             closed = self.trade_ledger.close_trade(symbol, order.avg_fill_price)
