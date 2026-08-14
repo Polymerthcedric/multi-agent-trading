@@ -7,6 +7,7 @@ Autonomous multi-agent trading system for **gold, silver, commodities, forex, st
 **Built by [Fidel Cedric Odoyo](https://github.com/Polymerthcedric)**
 - Portfolio: [polymerthcedric.github.io/portfolio](https://polymerthcedric.github.io/portfolio)
 - LinkedIn: [linkedin.com/in/fidel-odoyo](https://linkedin.com/in/fidel-odoyo)
+- Email: fidelcedricodoyo@gmail.com
 
 ## Architecture
 
