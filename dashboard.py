@@ -302,6 +302,7 @@ def render_risk_monitor():
     """)
 
 def main():
+    st.caption("Research demo. Orders and balances are simulated; market data may be delayed or unavailable.")
     feed = init_feed()
     if not feed.is_available():
         st.error("tradingview_ta not installed. Run: pip install tradingview-ta"); st.stop()

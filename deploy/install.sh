@@ -57,9 +57,8 @@ WHATSAPP_PHONE=254
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 
-# Dashboard Auth (change these!)
-DASHBOARD_USERNAME=admin
-DASHBOARD_PASSWORD=changeme123
+# Dashboard binding is not protected by a login. Keep it behind a trusted network.
+DASHBOARD_ADDRESS=127.0.0.1
 
 # Webhook
 WEBHOOK_HOST=0.0.0.0
@@ -99,5 +98,5 @@ echo ""
 echo "FREE PUBLIC ACCESS OPTIONS:"
 echo "  1. Streamlit Cloud: push to GitHub → share.streamlit.io → deploy"
 echo "  2. Ping Africa: cloud.ping.africa → sign up → deploy (M-Pesa!)"
-echo "  3. Oracle Cloud: cloud.oracle.com/free → ARM instance → free forever"
+echo "  3. Review current cloud pricing and instance availability before choosing a host."
 echo ""

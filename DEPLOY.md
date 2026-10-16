@@ -1,170 +1,38 @@
-# Deployment Guide — Multi-Agent Trading Bot
+# Run and deploy the research dashboard
 
-## Live Dashboard
-**Your trading bot is live:** [https://multi-agent-trading-epvurxxuzcdm3j3opza3tu.streamlit.app/](https://multi-agent-trading-epvurxxuzcdm3j3opza3tu.streamlit.app/)
+This project uses a paper-trading connector. It does not place live exchange orders. The dashboard and webhook server do not include user authentication, so keep them on a trusted network and do not expose them directly to the public internet.
 
-## Quick Start (5 minutes)
+## Run locally
 
-### Option A: Local (any machine)
 ```bash
 git clone https://github.com/Polymerthcedric/multi-agent-trading.git
 cd multi-agent-trading
 python3 start.py
 ```
 
-### Option B: Docker
+The launcher creates a virtual environment and `.env` file, installs the listed Python packages, then starts the dashboard on `http://localhost:8501`. The dashboard and webhook bind to `127.0.0.1` by default. The `.env` file is loaded by the launcher; keep secrets there and out of Git.
+
+To let devices on your home network open the dashboard, set `DASHBOARD_ADDRESS=0.0.0.0` in `.env`. The page has no login, so use this only on a trusted private network. Do not forward its port to the public internet.
+
+## Run with Docker Compose
+
 ```bash
-git clone https://github.com/Polymerthcedric/multi-agent-trading.git
-cd multi-agent-trading
-cp .env.example .env  # edit with your keys
-docker compose up -d
+cp .env.example .env
+# Edit .env and replace any placeholder secrets
+docker compose up --build
 ```
 
----
+Review the Compose port mappings and webhook settings before hosting the service. The dashboard and webhook endpoint also have no built-in login. Compose binds their published ports to localhost by default; keep them there or put them behind an authenticated gateway before allowing network access. Set a unique webhook secret before accepting requests. Requests receive a 503 response until one is configured.
 
-## Get a Public Link (Free)
+## Host the dashboard
 
-### Method 1: Streamlit Community Cloud (Easiest — No Credit Card)
+The app can be deployed to a Python or Docker hosting service that supports Streamlit. Follow that provider's current setup and pricing instructions, set `dashboard.py` as the app entry point, and add only the environment variables the project uses. Free plans, instance sizes, availability, and pricing change, so check the provider directly before choosing a host.
 
-1. Push your code to GitHub
-2. Go to https://share.streamlit.io
-3. Sign in with GitHub
-4. Select your repo, set main file to `dashboard.py`
-5. Click Deploy
-
-You get a public URL like `https://yourapp.streamlit.app`
-
-**Free tier:** 1GB RAM, app sleeps after 7 days of inactivity
-**Best for:** Dashboard viewing, no webhook server
-
-### Method 2: Ping Africa Cloud (Kenya-Friendly — No Credit Card)
-
-1. Go to https://cloud.ping.africa
-2. Sign up with GitHub or .edu email
-3. Get free credits
-4. Deploy as Docker container
-5. Pay with M-Pesa if needed
-
-**Free tier:** Free credits, M-Pesa available
-**Best for:** Kenya developers, always-on deployment
-
-### Method 3: Oracle Cloud Free Tier (Most Powerful)
-
-1. Go to https://cloud.oracle.com/free
-2. Sign up (requires debit card for identity verification — not charged)
-3. Create an ARM instance: 2 OCPU, 12GB RAM — free forever
-4. SSH in, run the bot
-
-**Free tier:** 2 OCPU, 12GB RAM, 200GB storage — free forever
-**Catch:** Requires credit/debit card for signup
-
-### Method 4: Google Cloud Free Tier
-
-1. Go to https://cloud.google.com/free
-2. Sign up (requires credit card for identity verification — not charged)
-3. Create an e2-micro instance (1GB RAM) — free forever
-4. SSH in, run the bot
-
-**Free tier:** 1 shared vCPU, 1GB RAM — free forever
-**Catch:** Only 1GB RAM, requires credit card
-
----
-
-## Add Authentication
-
-### Cloudflare Zero Trust (Free for ≤50 users)
-
-1. Go to [Zero Trust Dashboard](https://one.dash.cloudflare.com)
-2. Create Access Policy for your domain
-3. Add email verification or one-time PIN
-4. Anyone with the link must authenticate
-
-### Simple HTTP Auth
-
-Already configured via `.env`:
-```
-DASHBOARD_USERNAME=admin
-DASHBOARD_PASSWORD=your-secure-password
-```
-
----
-
-## WhatsApp Alerts (Kenya)
-
-1. Save +254 798 348 449 (CallMeBot) in your phone contacts
-2. Send `I allow callmebot to send me notifications`
-3. Get API key in reply
-4. Add to `.env`:
-```
-WHATSAPP_API_KEY=123456
-WHATSAPP_PHONE=254712345678
-```
-
-You'll get alerts for:
-- Trade executions
-- Daily P&L summaries
-- Kill switch triggers
-- Bot start/stop
-
----
-
-## Zero-Cost Architecture Options
-
-### Option 1: Local + Streamlit Cloud (Dashboard Only)
-```
-Your Laptop → Streamlit Community Cloud → Public URL
-```
-- Dashboard: public URL
-- Bot: runs locally
-- Cost: $0
-- Best for: Personal use, testing
-
-### Option 2: Oracle Cloud Free Tier (Full System)
-```
-Oracle Cloud ARM (12GB RAM) → Cloudflare Tunnel → Public URL
-```
-- Dashboard + Bot + Webhooks: all on Oracle
-- Cost: $0 forever
-- Best for: Always-on, full system
-
-### Option 3: Ping Africa Cloud (Kenya)
-```
-Ping Africa Cloud → Docker → Public URL
-```
-- Dashboard + Bot + Webhooks: all on cloud
-- Cost: Free credits, then M-Pesa
-- Best for: Kenya developers, local support
-
----
+A hosted dashboard is public unless you add access control at the hosting or network layer. Do not add exchange credentials: the included connector simulates orders and does not use exchange keys to trade.
 
 ## Troubleshooting
 
-### Check logs
-```bash
-docker compose logs -f
-# Or for local:
-tail -f trading_bot.log
-```
-
-### Restart
-```bash
-docker compose restart
-# Or for local: Ctrl+C, then python3 start.py
-```
-
-### Kill switch activated
-Check `config/learned_parameters.json` or `logs/trade_ledger.json`.
-Reset by deleting the file and restarting.
-
-### Health check
-```bash
-curl http://localhost:8000/health
-```
-
-### yfinance not working
-The bot uses xfinance with automatic failover (Yahoo→Stooq→Binance).
-If one source is down, it falls back automatically. No action needed.
-
-### tradingview-ta archived
-The library still works (v3.3.0) but is no longer maintained.
-The bot handles failures gracefully — cached data is used when API fails.
+- Check local logs in the terminal running `start.py` or `docker compose logs -f`.
+- If market data is unavailable, check the selected data source and its current service status. The dashboard may have no fresh prices to show.
+- Stop the local process with Ctrl+C, or stop Compose with `docker compose down`.
+- The dashboard uses virtual balances and simulated orders; displayed results are not evidence of future performance.
