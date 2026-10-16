@@ -11,6 +11,7 @@ import sys
 import subprocess
 import threading
 from pathlib import Path
+from dotenv import load_dotenv
 
 ROOT = Path(__file__).parent
 
@@ -47,12 +48,11 @@ def setup_env():
 # WhatsApp Alerts (see KENYA.md for how to get your API key)
 WHATSAPP_API_KEY=
 WHATSAPP_PHONE=254
+TRADINGVIEW_WEBHOOK_SECRET=
 
-# Dashboard password (change this!)
-DASHBOARD_PASSWORD=changeme
-
-# Trading mode: PAPER (safe) or LIVE (real money!)
-MODE=PAPER
+# Bind to this computer only. Set to 0.0.0.0 to allow other devices on your LAN.
+DASHBOARD_ADDRESS=127.0.0.1
+WEBHOOK_HOST=127.0.0.1
 """)
         print("")
         print("  FIRST TIME? Edit .env to add:")
@@ -63,6 +63,7 @@ MODE=PAPER
         print("")
     else:
         print("[3/4] .env exists")
+    load_dotenv(env_file, override=True)
 
 
 def run_webhook(venv):
@@ -79,6 +80,7 @@ def run_webhook(venv):
 
 
 def run_dashboard(venv):
+    dashboard_address = os.environ.get("DASHBOARD_ADDRESS", "127.0.0.1")
     print("[4/4] Starting dashboard...")
     print("")
     print("=" * 50)
@@ -104,10 +106,8 @@ def run_dashboard(venv):
                 str(streamlit), "run", str(ROOT / "dashboard.py"),
                 "--server.headless", "true",
                 "--server.port", "8501",
-                "--server.address", "0.0.0.0",
-                "--browser.serverAddress", "0.0.0.0",
-                "--server.enableCORS", "false",
-                "--server.enableXsrfProtection", "false",
+                "--server.address", dashboard_address,
+                "--browser.serverAddress", "localhost",
             ],
             cwd=str(ROOT),
         )

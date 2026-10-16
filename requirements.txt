@@ -15,3 +15,5 @@ xfinance>=0.4.1
 
 # Optional: Interactive Brokers
 # ib_insync>=0.9
+
+python-dotenv>=1.0

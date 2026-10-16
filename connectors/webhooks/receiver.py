@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-WEBHOOK_SECRET = os.getenv("TRADINGVIEW_WEBHOOK_SECRET", "your-secret-token-here")
+WEBHOOK_SECRET = os.getenv("TRADINGVIEW_WEBHOOK_SECRET", "")
 HOST = os.getenv("WEBHOOK_HOST", "0.0.0.0")
 PORT = int(os.getenv("WEBHOOK_PORT", "8000"))
 
@@ -101,7 +101,9 @@ def register_trading_callback(callback):
 
 @app.post("/webhook")
 async def webhook(payload: WebhookPayload, request: Request):
-    if payload.passphrase != WEBHOOK_SECRET:
+    if not WEBHOOK_SECRET:
+        raise HTTPException(status_code=503, detail="Webhook secret is not configured")
+    if not hmac.compare_digest(payload.passphrase, WEBHOOK_SECRET):
         logger.warning("Invalid passphrase from %s", request.client.host)
         raise HTTPException(status_code=403, detail="Invalid passphrase")
 
