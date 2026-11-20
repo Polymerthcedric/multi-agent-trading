@@ -11,9 +11,20 @@ import sys
 import subprocess
 import threading
 from pathlib import Path
-from dotenv import load_dotenv
 
 ROOT = Path(__file__).parent
+
+
+def load_env_file(path):
+    """Load KEY=VALUE lines with the stdlib so the launcher runs before deps install."""
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key:
+            os.environ[key] = value.strip().strip('"').strip("'")
 
 
 def check_python():
@@ -53,6 +64,8 @@ TRADINGVIEW_WEBHOOK_SECRET=
 # Bind to this computer only. Set to 0.0.0.0 to allow other devices on your LAN.
 DASHBOARD_ADDRESS=127.0.0.1
 WEBHOOK_HOST=127.0.0.1
+DASHBOARD_PORT=8501
+WEBHOOK_PORT=8000
 """)
         print("")
         print("  FIRST TIME? Edit .env to add:")
@@ -63,7 +76,7 @@ WEBHOOK_HOST=127.0.0.1
         print("")
     else:
         print("[3/4] .env exists")
-    load_dotenv(env_file, override=True)
+    load_env_file(env_file)
 
 
 def run_webhook(venv):
@@ -81,12 +94,14 @@ def run_webhook(venv):
 
 def run_dashboard(venv):
     dashboard_address = os.environ.get("DASHBOARD_ADDRESS", "127.0.0.1")
+    dashboard_port = os.environ.get("DASHBOARD_PORT", "8501")
+    webhook_port = os.environ.get("WEBHOOK_PORT", "8000")
     print("[4/4] Starting dashboard...")
     print("")
     print("=" * 50)
     print("  MULTI-AGENT TRADING BOT")
-    print("  Dashboard: http://localhost:8501")
-    print("  Webhooks:  http://localhost:8000")
+    print(f"  Dashboard: http://localhost:{dashboard_port}")
+    print(f"  Webhooks:  http://localhost:{webhook_port}")
     print("  Mode: PAPER TRADING (safe)")
     print("=" * 50)
     print("  Press Ctrl+C to stop")
@@ -105,7 +120,7 @@ def run_dashboard(venv):
             [
                 str(streamlit), "run", str(ROOT / "dashboard.py"),
                 "--server.headless", "true",
-                "--server.port", "8501",
+                "--server.port", dashboard_port,
                 "--server.address", dashboard_address,
                 "--browser.serverAddress", "localhost",
             ],

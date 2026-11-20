@@ -42,12 +42,12 @@ async def test_killswitch_disconnected_mode():
 
 
 async def test_killswitch_daily_drawdown_limit():
-    """Verify that the 5% daily drawdown limit is enforced."""
+    """Verify that the 3% daily drawdown limit is enforced."""
     from agents.risk_manager import RiskLimits
 
     logger.info("TEST: Kill-switch daily drawdown limit enforcement")
 
-    assert RiskLimits.daily_drawdown_halt == 0.05, f"Expected 0.05, got {RiskLimits.daily_drawdown_halt}"
+    assert RiskLimits.daily_drawdown_halt == 0.03, f"Expected 0.03, got {RiskLimits.daily_drawdown_halt}"
 
     for dd_pct in [0.01, 0.03, 0.05, 0.06, 0.10]:
         is_limited = dd_pct >= RiskLimits.daily_drawdown_halt

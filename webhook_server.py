@@ -89,7 +89,7 @@ def main():
     uvicorn.run(app, host=HOST, port=PORT, log_level="info")
 
 
-HOST = os.getenv("WEBHOOK_HOST", "0.0.0.0")
+HOST = os.getenv("WEBHOOK_HOST", "127.0.0.1")
 PORT = int(os.getenv("WEBHOOK_PORT", "8000"))
 
 if __name__ == "__main__":

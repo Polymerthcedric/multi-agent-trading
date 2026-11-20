@@ -1,6 +1,6 @@
 # Local setup
 
-The public Streamlit page is a demo dashboard. It uses paper trading and a virtual balance; it does not place live orders. Market data can be delayed or unavailable, and a hosted demo may sleep when unused.
+The Streamlit dashboard is a local demo. It uses paper trading and a virtual balance; it does not place live orders. Market data can be delayed or unavailable.
 
 ## Run on your computer
 

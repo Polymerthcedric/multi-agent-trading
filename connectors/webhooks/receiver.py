@@ -17,7 +17,7 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 WEBHOOK_SECRET = os.getenv("TRADINGVIEW_WEBHOOK_SECRET", "")
-HOST = os.getenv("WEBHOOK_HOST", "0.0.0.0")
+HOST = os.getenv("WEBHOOK_HOST", "127.0.0.1")
 PORT = int(os.getenv("WEBHOOK_PORT", "8000"))
 
 
