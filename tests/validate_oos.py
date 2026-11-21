@@ -48,6 +48,17 @@ DISCLAIMER = (
     "It is NOT market data and NOT evidence of real-market performance. "
     "Only results from --bars with a genuine chronological series are meaningful."
 )
+LOCAL_FILE_DISCLAIMER = (
+    "This report uses the local file {path}. Results depend on that file's bars, "
+    "costs, and assumptions. They are NOT evidence of real-market performance."
+)
+
+
+def disclaimer_for(bars_path: Optional[str]) -> str:
+    """Return the disclaimer that matches the data source."""
+    if bars_path is None:
+        return DISCLAIMER
+    return LOCAL_FILE_DISCLAIMER.format(path=str(bars_path))
 
 DEMO_BASE_PRICES = {
     "GOLD/USD": 2350.0, "SILVER/USD": 28.5, "EUR/USD": 1.14,
@@ -131,6 +142,10 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--warmup", type=int, default=50)
     parser.add_argument("--slippage-bps", type=float, default=2.0)
     parser.add_argument("--commission-pct", type=float, default=0.001)
+    parser.add_argument(
+        "--annual-factor", type=float, default=252.0 * 6.5,
+        help="Sharpe annualization factor (default 1638 for hourly bars; use 252 for daily bars)",
+    )
     parser.add_argument("--output", default=DEFAULT_OUTPUT, help="JSON report path")
     parser.add_argument("--no-write", action="store_true", help="do not write the JSON report")
     return parser.parse_args(argv)
@@ -147,6 +162,7 @@ def run_validation(args: argparse.Namespace) -> Dict[str, Any]:
         warmup=args.warmup,
         slippage_bps=args.slippage_bps,
         commission_pct=args.commission_pct,
+        annual_factor=args.annual_factor,
     )
     validator = WalkForwardValidator(config)
     local_bars = load_bars(args.bars) if args.bars else None
@@ -179,7 +195,7 @@ def run_validation(args: argparse.Namespace) -> Dict[str, Any]:
     ]
     return {
         "timestamp": time.time(),
-        "disclaimer": DISCLAIMER,
+        "disclaimer": disclaimer_for(args.bars),
         "data_source": data_source,
         "config": config.as_dict(),
         "symbols": per_symbol,
@@ -193,7 +209,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
     logger.info("=" * 70)
     logger.info("WALK-FORWARD OUT-OF-SAMPLE VALIDATION")
-    logger.info("%s", DISCLAIMER)
+    logger.info("%s", disclaimer_for(args.bars))
     logger.info("=" * 70)
 
     report = run_validation(args)
@@ -208,10 +224,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         for symbol, r in report["symbols"].items()
         if r["folds"] and r["aggregate"]["mean_sharpe_degradation"] < -0.5
     ]
-    if warnings:
+    scored = [symbol for symbol, result in report["symbols"].items() if result["folds"]]
+    if not scored:
+        logger.warning("No folds were scored; Sharpe degradation was not evaluated.")
+    elif warnings:
         logger.warning("Severe Sharpe degradation: %s", warnings)
     else:
-        logger.info("No severe aggregate Sharpe degradation detected.")
+        logger.info("No severe aggregate Sharpe degradation detected for scored symbols.")
     return 0
 
 

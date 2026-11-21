@@ -22,7 +22,7 @@ The first run creates a virtual environment, installs dependencies, and creates 
 - A portfolio risk monitor that checks correlation, exposure, and historical VaR before a new long position
 - A walk-forward validator in `engine/walk_forward.py`
 
-The project is experimental. Backtest results depend on the data, costs, and assumptions used. The included live exchange connector is a stub; changing an environment variable does not enable live orders.
+The project is experimental. Backtest results depend on the data, costs, and assumptions used. `LiveExchangeConnector` is a stub. The IBKR adapter reads market data only: it rejects live ports and never places an order. Orders run through `PaperTradingConnector` with a virtual balance.
 
 ## Validation
 
@@ -42,9 +42,15 @@ python3 tests/validate_oos.py --demo-bars 240 --no-write
 python3 tests/validate_oos.py --bars data/bars.csv --output logs/oos.json
 ```
 
-The demo mode generates deterministic synthetic bars. Those results are not evidence of real-market performance. Use `--bars` with one real chronological series to test an idea. Each fold tunes the evaluator on its train window only, then scores the following test window once. The validator never feeds test bars into parameter choice.
+The demo mode generates deterministic synthetic bars. Those results are not evidence of real-market performance. Use `--bars` with one real chronological series to test an idea. Each fold tunes the evaluator on its train window only, then scores the following test window once. The validator never feeds test bars into parameter choice. Sharpe uses an annual factor of 1638 by default, which assumes hourly bars. Pass `--annual-factor 252` for daily bars.
 
-Portfolio risk numbers are indicative. Return inputs come from bar or snapshot closes, not uniform daily bars. The gate blocks a new long when exposure, correlated concentration, or 99% VaR exceeds its limit. It still allows sells and position reductions.
+A demo report is labelled `SYNTHETIC_DEMO`. A `--bars` report names the local file and does not make a performance claim. Both labels say that the numbers are not evidence of real-market performance.
+
+Portfolio risk numbers are indicative. Return inputs come from bar or snapshot closes, not uniform daily bars. The gate blocks a long entry or an addition to a long when exposure, correlated concentration, or 99% VaR exceeds its limit. It does not block sells or position reductions.
+
+## Known limitation
+
+The drawdown kill switch in `agents/risk_manager.py` latches until the runner restarts. It halts new paper orders and does not flatten open positions. I have not wired a forced-close path because this project is for research, not live risk management.
 
 ## Docker
 

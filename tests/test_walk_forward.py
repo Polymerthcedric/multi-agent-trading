@@ -94,6 +94,15 @@ def test_fold_boundaries_are_chronological_and_test_windows_non_overlapping():
     for earlier, later in zip(exp_folds, exp_folds[1:]):
         assert later.test_start >= earlier.test_end
 
+    # A step larger than the test window leaves gaps but never overlaps tests.
+    gapped = WalkForwardConfig(train_window=40, test_window=10, step=15, warmup=20)
+    gap_folds = build_folds(200, gapped)
+    assert len(gap_folds) >= 2
+    for earlier, later in zip(gap_folds, gap_folds[1:]):
+        assert later.test_start == earlier.test_start + gapped.step
+        assert later.test_start >= earlier.test_end
+        assert later.train_start == earlier.train_start + gapped.step
+
     # Bad configs cannot produce overlapping test windows.
     with pytest.raises(ValueError):
         WalkForwardConfig(train_window=40, test_window=10, step=5)
@@ -166,6 +175,42 @@ def test_turnover_and_costs_reduce_net_pnl():
     assert expensive_report.aggregate.mean_test_sharpe <= cheap_report.aggregate.mean_test_sharpe
 
 
+def test_evaluator_sees_current_bar_drawdown_and_unrealized_pnl():
+    class SpyEvaluator:
+        def __init__(self) -> None:
+            self.vectors: List[List[float]] = []
+
+        def evaluate(self, vector):
+            self.vectors.append([float(value) for value in vector])
+            # Buy once at the first bar, then hold through the price break.
+            return 2.0 if len(self.vectors) == 1 else 0.0
+
+    bars = _trend_bars(40)
+    price = bars[-1]["close"]
+    for i in range(40, 60):
+        open_price = price
+        close = price * 0.6 if i == 40 else price
+        bars.append({
+            "timestamp": float(1_700_000_000 + i * 3600),
+            "open": open_price,
+            "high": max(open_price, close) * 1.001,
+            "low": min(open_price, close) * 0.999,
+            "close": close,
+            "volume": 1000.0,
+        })
+        price = close
+
+    spy = SpyEvaluator()
+    result = run_backtest(bars, spy, start=0, end=60)
+    assert result.trade_count >= 1
+    assert len(spy.vectors) == 60
+
+    # Index 40 is the first break bar. A one-bar-stale portfolio would still
+    # report drawdown 0 and the old unrealized PnL there.
+    assert spy.vectors[40][16] < -0.01
+    assert spy.vectors[40][17] < 0.0
+
+
 def test_empty_and_short_series_return_safe_empty_result():
     config = WalkForwardConfig(train_window=60, test_window=20, step=20, warmup=30)
     validator = WalkForwardValidator(config)
@@ -187,20 +232,38 @@ def test_empty_and_short_series_return_safe_empty_result():
     assert run_backtest([], StateEvaluator()).net_pnl == 0.0
 
 
-def test_validate_oos_labels_synthetic_demo_data_and_accepts_local_bars():
-    from tests.validate_oos import DISCLAIMER, generate_demo_bars, parse_args, run_validation
+def test_validate_oos_labels_synthetic_demo_data_and_accepts_local_bars(tmp_path):
+    from tests.validate_oos import (
+        DISCLAIMER, disclaimer_for, generate_demo_bars, parse_args, run_validation,
+    )
 
     assert "SYNTHETIC" in DISCLAIMER
     assert "NOT evidence of real-market performance" in DISCLAIMER
+    assert disclaimer_for(None) == DISCLAIMER
+    assert "series.csv" in disclaimer_for("series.csv")
+    assert "SYNTHETIC" not in disclaimer_for("series.csv")
     assert parse_args(["--bars", "series.csv"]).bars == "series.csv"
     assert generate_demo_bars("AAPL", 60) == generate_demo_bars("AAPL", 60)
 
-    report = run_validation(parse_args([
+    demo_report = run_validation(parse_args([
         "--symbols", "AAPL", "--demo-bars", "160", "--no-write",
     ]))
-    assert report["data_source"] == "SYNTHETIC_DEMO"
-    assert report["disclaimer"] == DISCLAIMER
-    json.dumps(report)  # report writer can serialize it
+    assert demo_report["data_source"] == "SYNTHETIC_DEMO"
+    assert demo_report["disclaimer"] == DISCLAIMER
+    json.dumps(demo_report)  # report writer can serialize it
+
+    bars_path = tmp_path / "daily_bars.json"
+    bars_path.write_text(json.dumps(generate_demo_bars("AAPL", 160)), encoding="utf-8")
+    args = parse_args([
+        "--bars", str(bars_path), "--symbols", "AAPL",
+        "--annual-factor", "252", "--no-write",
+    ])
+    local_report = run_validation(args)
+    assert local_report["data_source"] == f"LOCAL_FILE:{bars_path}"
+    assert local_report["disclaimer"] == disclaimer_for(str(bars_path))
+    assert "SYNTHETIC" not in local_report["disclaimer"]
+    assert local_report["config"]["annual_factor"] == 252.0
+    json.dumps(local_report)
 
 
 def test_report_is_deterministic_and_json_serializable():

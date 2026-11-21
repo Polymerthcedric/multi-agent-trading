@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 from types import SimpleNamespace
 
@@ -197,7 +198,7 @@ def test_new_long_gate_rejects_denied_position_and_logs_reasons(caplog):
     assert "concentrated_correlated_exposure" in caplog.text
 
 
-def test_new_long_gate_allows_existing_positions_and_fails_open(caplog):
+def test_new_long_gate_checks_additions_and_fails_open(caplog):
     if main_module is None:
         pytest.skip(f"main.py imports unavailable: {MAIN_IMPORT_ERROR}")
 
@@ -209,16 +210,93 @@ def test_new_long_gate_allows_existing_positions_and_fails_open(caplog):
     orch, decision_log = _orchestrator_with_fake_monitor(monitor)
     balance = SimpleNamespace(positions={"GOLD/USD": 1.5})
 
-    # Adding to a long or covering a short must not be blocked.
-    assert orch._reject_new_long_if_risky("GOLD/USD", balance) is False
-    balance.positions["GOLD/USD"] = -1.5
-    assert orch._reject_new_long_if_risky("GOLD/USD", balance) is False
-    assert decision_log.updates == []
-    assert monitor.calls == 0
+    # An addition to an existing long also increases exposure and is checked.
+    assert orch._reject_new_long_if_risky("GOLD/USD", balance) is True
+    assert monitor.calls == 1
+    assert decision_log.updates == [("GOLD/USD", "rejected")]
 
     # A monitor bug must never stop trading (fail open, but logged).
-    balance.positions = {}
     orch.portfolio_risk = _FakeMonitor(error=RuntimeError("monitor bug"))
     assert orch._reject_new_long_if_risky("GOLD/USD", balance) is False
     assert "monitor bug" in caplog.text
-    assert decision_log.updates == []
+
+
+def test_sell_execution_never_calls_portfolio_gate():
+    if main_module is None:
+        pytest.skip(f"main.py imports unavailable: {MAIN_IMPORT_ERROR}")
+
+    from dataclasses import dataclass
+
+    @dataclass
+    class _Prediction:
+        confidence: float = 0.8
+
+    class _Connector:
+        async def get_balance(self):
+            return SimpleNamespace(total_equity=100_000.0, positions={"GOLD/USD": 1.0})
+
+    class _Broker:
+        def __init__(self):
+            self.actions = []
+
+        async def execute_action(self, **kwargs):
+            self.actions.append(kwargs["action"])
+            return SimpleNamespace(status="filled", avg_fill_price=100.0, filled_quantity=1.0)
+
+    class _Environment:
+        portfolio_value = 100_000.0
+        cash = 100_000.0
+        tc_pct = 0.001
+        slippage_pct = 0.0005
+
+        def apply_trade(self, action, fill_price, quantity):
+            return 0.0
+
+    class _Ledger:
+        def record(self, entry):
+            pass
+
+    class _TradeLedger:
+        def close_trade(self, symbol, price):
+            return None
+
+    monitor = _FakeMonitor(SimpleNamespace(
+        allow_new_position=False,
+        reasoning={"deny_reasons": ["total_exposure_exceeded"]},
+        correlation_warnings=[],
+    ))
+    broker = _Broker()
+    orch = object.__new__(main_module.TradingOrchestrator)
+    orch.portfolio_risk = monitor
+    orch.connector = _Connector()
+    orch.broker = broker
+    orch.decision_log = _FakeDecisionLog()
+    orch.environments = {"GOLD/USD": _Environment()}
+    orch.risk = SimpleNamespace(update_portfolio_value=lambda value: None)
+    orch.runtime_ledger = _Ledger()
+    orch.trade_ledger = _TradeLedger()
+    orch._trade_count = 0
+    sync_calls = []
+
+    async def _fake_sync(*args, **kwargs):
+        sync_calls.append((args, kwargs))
+
+    orch._sync_portfolio_risk = _fake_sync
+    original_asdict = main_module.asdict
+    main_module.asdict = lambda value: {}
+    try:
+        asyncio.run(orch._execute_trade(
+            symbol="GOLD/USD",
+            action_label="SELL",
+            allocation_pct=0.1,
+            price=100.0,
+            prediction=_Prediction(),
+            context=SimpleNamespace(),
+            volatility=SimpleNamespace(atr=1.0, z_score=0.0),
+        ))
+    finally:
+        main_module.asdict = original_asdict
+
+    assert broker.actions == [2]
+    assert monitor.calls == 0
+    assert ("GOLD/USD", "rejected") not in orch.decision_log.updates

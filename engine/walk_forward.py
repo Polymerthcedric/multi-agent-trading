@@ -474,14 +474,18 @@ def _run_kernel(
             returns.append((current_equity - previous_equity) / previous_equity)
         equity.append(current_equity)
 
+        # Publish the post-fill portfolio before MarketState derives
+        # drawdown_pct and unrealized_pnl. Otherwise the evaluator sees the
+        # previous bar's values and decisions lag one bar behind the mark.
+        state.cash = cash
+        state.position = position
+        state.avg_entry = entry_price if position > 0 else 0.0
+        state.portfolio_value = current_equity
+        state.peak_value = peak
+
         md = dict(features[i])
         md.pop("prior_closes", None)
         new_state = MarketState.from_market_data(symbol, md, state=state)
-        new_state.cash = cash
-        new_state.position = position
-        new_state.avg_entry = entry_price if position > 0 else 0.0
-        new_state.portfolio_value = current_equity
-        new_state.peak_value = peak
         score = evaluator.evaluate(new_state.to_vector())
 
         if score > config.buy_threshold and position <= 0:

@@ -278,8 +278,9 @@ class TradingOrchestrator:
         portfolio_value = balance.total_equity
 
         if action_label == "BUY":
-            # Only a genuinely new long is gated; SELLs (and adding to an
-            # existing position) stay available so risk can always be reduced.
+            # Every BUY increases long exposure, including an addition to an
+            # existing long. SELLs never reach this gate, so risk can still be
+            # reduced when limits are tight.
             await self._sync_portfolio_risk(balance, {symbol: price})
             if self._reject_new_long_if_risky(symbol, balance):
                 return
@@ -302,10 +303,23 @@ class TradingOrchestrator:
         env = self.environments[symbol]
         reward = env.apply_trade(action_int, order.avg_fill_price, order.filled_quantity)
 
-        self.risk.update_portfolio_value(env.portfolio_value)
+        # Use the connector equity for portfolio drawdown. Each TradingEnvironment
+        # starts from the full paper balance and tracks one symbol, so its value
+        # is not the current total portfolio value.
+        post_trade_balance = None
+        try:
+            post_trade_balance = await self.connector.get_balance()
+        except Exception as e:
+            logger.warning("Portfolio value refresh failed after %s %s: %s", action_label, symbol, e)
+        post_trade_equity = (
+            post_trade_balance.total_equity if post_trade_balance is not None else portfolio_value
+        )
+        self.risk.update_portfolio_value(post_trade_equity)
         # Refresh monitor state from the connector now that the fill has
         # changed cash and positions (as trades happen, not just next tick).
-        await self._sync_portfolio_risk(price_updates={symbol: order.avg_fill_price})
+        await self._sync_portfolio_risk(
+            post_trade_balance, {symbol: order.avg_fill_price},
+        )
 
         ledger_entry = LedgerEntry(
             timestamp=time.time(),
@@ -323,7 +337,7 @@ class TradingOrchestrator:
             ],
             reward=round(reward, 6),
             portfolio_value_before=round(portfolio_value, 2),
-            portfolio_value_after=round(env.portfolio_value, 2),
+            portfolio_value_after=round(post_trade_equity, 2),
             transaction_cost=portfolio_value * env.tc_pct,
             slippage=portfolio_value * env.slippage_pct,
             agent_reasoning={
@@ -480,19 +494,14 @@ class TradingOrchestrator:
             logger.error("PortfolioRisk | portfolio sync failed: %s", e)
 
     def _reject_new_long_if_risky(self, symbol: str, balance) -> bool:
-        """Return True when a new long must be skipped and logged as rejected.
+        """Return True when a BUY must be skipped and logged as rejected.
 
-        A monitor failure fails open (trading continues) but is logged. An
-        existing position of either sign is never gated, so SELLs and risk
-        reduction always remain available.
+        The caller uses this only for BUY orders, so additions to an existing
+        long are checked too. A monitor failure fails open (trading continues)
+        but is logged. SELLs never call this method, so risk reduction remains
+        available when limits are tight.
         """
         if self.portfolio_risk is None:
-            return False
-        try:
-            existing_qty = _safe_number((balance.positions or {}).get(symbol, 0.0)) or 0.0
-        except Exception:
-            existing_qty = 0.0
-        if existing_qty != 0.0:
             return False
 
         try:

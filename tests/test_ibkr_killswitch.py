@@ -107,6 +107,33 @@ async def test_killswitch_demo_allows_synthetic():
     logger.info("  PASSED: DEMO mode allows synthetic fallback\n")
 
 
+def test_ibkr_live_connection_is_blocked():
+    """The adapter must not connect to a live IBKR account."""
+    from connectors.ibkr import IBConnector
+
+    for kwargs in (
+        {"mode": "LIVE"},
+        {"paper": False},
+        {"port": 7496},
+        {"port": 4001},
+    ):
+        connector = IBConnector(**kwargs)
+        # No socket is opened: the paper-only check runs before is_available().
+        assert connector.connect() is False
+
+
+def test_ibkr_order_placement_is_disabled_even_when_connected():
+    """A connected IBKR adapter must still reject orders."""
+    from connectors.ibkr import IBConnector
+
+    connector = IBConnector()
+    connector._connected = True
+    connector._ib = object()
+    order = asyncio.run(connector.execute_order("AAPL", "buy", 1.0))
+    assert order["status"] == "rejected"
+    assert "paper-trading only" in order["error"]
+
+
 async def main():
     logger.info("=" * 70)
     logger.info("IBKR KILL-SWITCH INTEGRATION TEST SUITE")

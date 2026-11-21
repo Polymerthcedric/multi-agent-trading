@@ -10,6 +10,10 @@ _MODE_LIVE = "LIVE"
 _MODE_PAPER = "PAPER"
 _MODE_DEMO = "DEMO"
 
+# IBKR paper ports. The live ports (7496 TWS / 4001 gateway) are rejected.
+PAPER_PORTS = (7497, 4002)
+LIVE_PORTS = (7496, 4001)
+
 
 class IBKRDataError(RuntimeError):
     pass
@@ -45,6 +49,13 @@ class IBConnector:
             return False
 
     def connect(self) -> bool:
+        if not self.paper or self.mode == _MODE_LIVE or self.port in LIVE_PORTS:
+            logger.warning(
+                "IBKR | live connection blocked; this project is paper-trading only",
+            )
+            return False
+        if self.port not in PAPER_PORTS:
+            logger.warning("IBKR | port %d is not a known IBKR paper port", self.port)
         if not self.is_available():
             logger.warning("IBKR | ib_insync not installed. Run: pip install ib_insync")
             return False
@@ -138,27 +149,16 @@ class IBConnector:
             return {"total_equity": 100000.0, "cash": 100000.0, "positions": {}}
 
     async def execute_order(self, symbol: str, side: str, quantity: float, order_type: str = "market") -> Dict:
-        if not self._connected or not self._ib:
-            logger.warning("IBKR | not connected, order rejected for %s", symbol)
-            return {"status": "rejected", "error": "not connected"}
-        try:
-            from ib_insync import MarketOrder, LimitOrder
-            contract = self._get_contract(symbol)
-            order = MarketOrder(side.upper(), quantity)
-            trade = self._ib.placeOrder(contract, order)
-            self._ib.sleep(1)
-            fill = trade.fills[0] if trade.fills else None
-            return {
-                "order_id": str(trade.order.orderId),
-                "status": trade.orderStatus.status,
-                "filled_quantity": float(fill.execution.shares) if fill else 0.0,
-                "avg_fill_price": float(fill.execution.price) if fill else 0.0,
-                "symbol": symbol,
-                "side": side,
-            }
-        except Exception as e:
-            logger.error("IBKR | order error: %s", e)
-            return {"status": "rejected", "error": str(e)}
+        # This project papers trades with PaperTradingConnector. The IBKR
+        # adapter reads market data only; it never places an order.
+        logger.warning("IBKR | order placement disabled for %s; paper-trading only", symbol)
+        return {
+            "status": "rejected",
+            "error": "IBKR order placement disabled (paper-trading only)",
+            "symbol": symbol,
+            "side": side,
+            "quantity": quantity,
+        }
 
     async def get_historical_data(self, symbol: str, days: int = 30, bar_size: str = "1 hour") -> List[Dict]:
         if not self._connected or not self._ib:
