@@ -541,7 +541,7 @@ async def main() -> None:
     setup_logging(settings)
 
     logger.info("=" * 60)
-    logger.info("Multi-Agent Autonomous Trading — Paper Mode")
+    logger.info("Multi-Agent Trading Research — Paper Mode (no live orders)")
     logger.info("Assets: Gold, Silver, Forex, Stocks, ETFs")
     logger.info("Data: yfinance primary | Agents: Predictive + Context + Volatility + Sentiment + Debate")
     logger.info("=" * 60)

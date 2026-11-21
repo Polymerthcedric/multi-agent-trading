@@ -1,7 +1,16 @@
+"""Manual check for the TradingView data feed.
+
+Run with ``python test_tv_symbols.py``. This script calls a live data provider;
+it is not a pytest test and is excluded from the automated suite.
+"""
+from __future__ import annotations
+
 import asyncio
+
 from connectors.tv_datafeed import TradingViewFeed
 
-async def test():
+
+async def check_symbols() -> None:
     feed = TradingViewFeed()
     for sym in feed.symbols:
         snap = await feed.get_snapshot(sym)
@@ -10,4 +19,6 @@ async def test():
         else:
             print(f"FAIL {sym:12s} no data")
 
-asyncio.run(test())
+
+if __name__ == "__main__":
+    asyncio.run(check_symbols())

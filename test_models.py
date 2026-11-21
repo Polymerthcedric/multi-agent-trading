@@ -1,3 +1,8 @@
+"""Manual agent smoke checks.
+
+Run with ``python test_models.py --sim`` or ``--live``. The live mode calls an
+external data provider, so pytest does not collect these functions as tests.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +19,7 @@ from agents.risk_manager import RiskManager
 logger = logging.getLogger(__name__)
 
 
-async def test_with_live_data() -> None:
+async def run_live_check() -> None:
     from connectors.tv_datafeed import TradingViewFeed
     from logging_config import setup_logging
 
@@ -73,7 +78,7 @@ async def test_with_live_data() -> None:
     logger.info("All live tests complete.")
 
 
-async def test_with_simulation() -> None:
+async def run_simulation_check() -> None:
     from connectors.platform import PaperTradingConnector
     from execution.broker import Broker, ACTION_LABEL_TO_INT
     from engine.environment import TradingEnvironment
@@ -130,9 +135,9 @@ async def test_with_simulation() -> None:
 
 async def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "--live":
-        await test_with_live_data()
+        await run_live_check()
     elif len(sys.argv) > 1 and sys.argv[1] == "--sim":
-        await test_with_simulation()
+        await run_simulation_check()
     else:
         print("Usage: python test_models.py [--live | --sim]")
         print("  --live  Test all agents with live TradingView data")

@@ -19,8 +19,32 @@ The first run creates a virtual environment, installs dependencies, and creates 
 - Market-data adapters under `connectors/`
 - A Streamlit dashboard and historical evaluation scripts
 - A paper-trading connector used by the main runner and dashboard
+- A portfolio risk monitor that checks correlation, exposure, and historical VaR before a new long position
+- A walk-forward validator in `engine/walk_forward.py`
 
 The project is experimental. Backtest results depend on the data, costs, and assumptions used. The included live exchange connector is a stub; changing an environment variable does not enable live orders.
+
+## Validation
+
+Run the offline tests with the optional test dependencies:
+
+```sh
+python3 -m pip install -r requirements-dev.txt
+python3 -m pytest
+```
+
+`python3 -m pytest` runs the local suite. It does not call a data provider. The scripts `test_models.py` and `test_tv_symbols.py` are manual checks and need explicit flags or a direct run.
+
+For walk-forward validation:
+
+```sh
+python3 tests/validate_oos.py --demo-bars 240 --no-write
+python3 tests/validate_oos.py --bars data/bars.csv --output logs/oos.json
+```
+
+The demo mode generates deterministic synthetic bars. Those results are not evidence of real-market performance. Use `--bars` with one real chronological series to test an idea. Each fold tunes the evaluator on its train window only, then scores the following test window once. The validator never feeds test bars into parameter choice.
+
+Portfolio risk numbers are indicative. Return inputs come from bar or snapshot closes, not uniform daily bars. The gate blocks a new long when exposure, correlated concentration, or 99% VaR exceeds its limit. It still allows sells and position reductions.
 
 ## Docker
 

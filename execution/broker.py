@@ -11,12 +11,13 @@ logger = logging.getLogger(__name__)
 ACTION_MAP: Dict[int, str] = {0: "HOLD", 1: "BUY", 2: "SELL"}
 ACTION_LABEL_TO_INT: Dict[str, int] = {"HOLD": 0, "BUY": 1, "SELL": 2}
 
+# Maximum order notional as a fraction of portfolio value. This is not a share count.
 MAX_ORDER_SIZE: float = 1.0
 
 
 @dataclass
 class ExecutionConstraints:
-    max_order_size: float = MAX_ORDER_SIZE
+    max_order_size: float = MAX_ORDER_SIZE  # fraction of portfolio notional
     max_position_pct: float = 0.25
     slippage_bps: float = 2.0
     spread_bps: float = 1.0
@@ -82,7 +83,9 @@ class Broker:
         if actual_risk > max_risk_notional and actual_risk > 0:
             risk_scale = max_risk_notional / actual_risk
             raw_qty *= risk_scale
-        raw_qty = min(raw_qty, self.constraints.max_order_size)
+        max_notional = portfolio_value * self.constraints.max_order_size
+        qty_cap = max_notional / fill_price if fill_price > 0 else 0.0
+        raw_qty = min(raw_qty, qty_cap)
         return raw_qty, fill_price, cost_breakdown
 
     async def execute_action(

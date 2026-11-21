@@ -70,6 +70,7 @@ class RiskManager:
         self._trading_halted: bool = False
         self._kill_switch: bool = False
         self._peak_value: float = initial_portfolio_value
+        self._current_portfolio_value: float = initial_portfolio_value
         self._lockdown_until: float = 0.0
         self._confidence_threshold = MIN_CONFIDENCE_THRESHOLD
         self._position_sizing_k = POSITION_SIZING_K
@@ -98,6 +99,7 @@ class RiskManager:
         )
 
     def update_portfolio_value(self, portfolio_value: float) -> None:
+        self._current_portfolio_value = portfolio_value
         self._peak_value = max(self._peak_value, portfolio_value)
 
     def _estimate_fill_price(self, side: str, quoted_price: float) -> float:
@@ -153,13 +155,17 @@ class RiskManager:
 
         drawdown_pct = self._daily_pnl / self._peak_value if self._peak_value > 0 else 0.0
         weekly_dd_pct = self._weekly_pnl / self._peak_value if self._peak_value > 0 else 0.0
-        total_dd_pct = (self._peak_value - self._peak_value + self._daily_pnl) / self._peak_value if self._peak_value > 0 else 0.0
+        # Total drawdown is a positive fraction of the peak: (peak - current) / peak.
+        total_dd_pct = (
+            (self._peak_value - self._current_portfolio_value) / self._peak_value
+            if self._peak_value > 0 else 0.0
+        )
 
-        if drawdown_pct <= -self.limits.kill_switch_drawdown or total_dd_pct <= -self.limits.kill_switch_drawdown:
+        if drawdown_pct <= -self.limits.kill_switch_drawdown or total_dd_pct >= self.limits.kill_switch_drawdown:
             self._kill_switch = True
             logger.critical(
-                "KILL SWITCH | drawdown=%.4f weekly=%.4f threshold=%.4f",
-                drawdown_pct, weekly_dd_pct, self.limits.kill_switch_drawdown,
+                "KILL SWITCH | daily_drawdown=%.4f weekly_drawdown=%.4f total_drawdown=%.4f threshold=%.4f",
+                drawdown_pct, weekly_dd_pct, total_dd_pct, self.limits.kill_switch_drawdown,
             )
         elif drawdown_pct <= -self.limits.daily_drawdown_halt:
             self._trading_halted = True

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import random
 import time
 from abc import ABC, abstractmethod
@@ -12,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 MAX_TRADE_HISTORY = 500
 MAX_EQUITY_POINTS = 10000
+MIN_QUANTITY = 0.0001
 
 
 @dataclass
@@ -117,47 +119,77 @@ class PaperTradingConnector(BaseExchangeConnector):
         self, symbol: str, side: str, quantity: float, order_type: str = "market",
     ) -> OrderResult:
         self._order_id_counter += 1
-        price_data = await self.get_market_data(symbol)
-        fill_price = price_data["price"]
-        side_lower = side.lower()
+        order_id = f"paper_{self._order_id_counter}"
+        requested_qty = quantity
+        side_lower = side.lower() if isinstance(side, str) else ""
 
+        def reject(reason: str, price: float = 0.0) -> OrderResult:
+            logger.warning("PaperTrading | rejected %s %s %s", side_lower, symbol, reason)
+            return OrderResult(
+                order_id=order_id, symbol=symbol, side=side_lower,
+                quantity=requested_qty, price=price, filled_quantity=0.0,
+                avg_fill_price=0.0, status="rejected", timestamp=time.time(),
+                error=reason,
+            )
+
+        if side_lower not in ("buy", "sell"):
+            return reject(f"unsupported side: {side!r}")
+        if not isinstance(quantity, (int, float)) or isinstance(quantity, bool) or not math.isfinite(quantity):
+            return reject(f"invalid quantity: {quantity!r}")
+        if quantity < MIN_QUANTITY:
+            return reject(f"quantity {quantity:.8f} below minimum {MIN_QUANTITY}")
+
+        price_data = await self.get_market_data(symbol)
+        fill_price = float(price_data.get("price", 0.0))
+        if not math.isfinite(fill_price) or fill_price <= 0:
+            return reject(f"invalid fill price: {fill_price}", fill_price)
+
+        filled_qty = 0.0
         if side_lower == "buy":
             cost = quantity * fill_price
+            if cost > self._cash:
+                affordable_qty = self._cash / fill_price
+                if affordable_qty < MIN_QUANTITY:
+                    return reject(
+                        f"insufficient cash: need {cost:.2f}, have {self._cash:.2f}", fill_price,
+                    )
+                quantity = affordable_qty
+                cost = quantity * fill_price
+                logger.info("PaperTrading | reduced buy qty to %.6f (cash limited)", quantity)
             self._cash -= cost
             self._positions[symbol] = self._positions.get(symbol, 0.0) + quantity
-        elif side_lower == "sell":
+            filled_qty = quantity
+        else:
             current = self._positions.get(symbol, 0.0)
-            actual_qty = min(quantity, current)
-            if actual_qty <= 0:
-                logger.warning("PaperTrading | cannot sell %s: position=%.6f, requested=%.6f", symbol, current, quantity)
-                return OrderResult(
-                    order_id=f"paper_{self._order_id_counter}", symbol=symbol, side=side_lower,
-                    quantity=quantity, price=fill_price, filled_quantity=0.0,
-                    avg_fill_price=0.0, status="rejected", timestamp=time.time(),
-                    error=f"position too small: have {current:.6f}, want {quantity:.6f}",
+            filled_qty = min(quantity, current)
+            if filled_qty < MIN_QUANTITY:
+                return reject(
+                    f"position too small: have {current:.6f}, want {quantity:.6f}", fill_price,
                 )
-            proceeds = actual_qty * fill_price
-            self._cash += proceeds
-            remaining = current - actual_qty
-            if remaining <= 0:
+            self._cash += filled_qty * fill_price
+            remaining = current - filled_qty
+            if remaining <= 1e-12:
                 self._positions.pop(symbol, None)
             else:
                 self._positions[symbol] = remaining
 
         result = OrderResult(
-            order_id=f"paper_{self._order_id_counter}",
+            order_id=order_id,
             symbol=symbol,
             side=side_lower,
-            quantity=quantity,
+            quantity=requested_qty,
             price=fill_price,
-            filled_quantity=quantity if side_lower == "buy" else min(quantity, current if side_lower == "sell" else quantity),
+            filled_quantity=filled_qty,
             avg_fill_price=fill_price,
             status="filled",
             timestamp=time.time(),
         )
         self._trade_history.append(result)
         self._equity_curve.append(self._cash + await self._position_value())
-        logger.info("PaperTrading | %s %s %.4f @ %.2f", side_lower, symbol, quantity, fill_price)
+        logger.info(
+            "PaperTrading | %s %s requested=%.6f filled=%.6f @ %.2f",
+            side_lower, symbol, requested_qty, filled_qty, fill_price,
+        )
         return result
 
     async def get_positions(self) -> Dict[str, float]:

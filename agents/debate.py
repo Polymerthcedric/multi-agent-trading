@@ -90,7 +90,7 @@ class BullBearDebate:
             strength += 0.05
 
         sma = market_data.get("sma", 0)
-        if price > sma > 0:
+        if 0 < sma < price:
             points.append(f"Price ${price:,.2f} above SMA ${sma:,.2f}")
             strength += 0.1
 
@@ -150,7 +150,7 @@ class BullBearDebate:
             strength += 0.05
 
         sma = market_data.get("sma", 0)
-        if price < sma < 0:
+        if 0 < price < sma:
             points.append(f"Price ${price:,.2f} below SMA ${sma:,.2f}")
             strength += 0.1
 
