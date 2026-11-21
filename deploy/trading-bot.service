@@ -1,5 +1,5 @@
 [Unit]
-Description=Multi-Agent Trading Bot
+Description=Multi-Agent Trading research dashboard (paper trading only)
 After=network-online.target docker.service
 Wants=network-online.target
 StartLimitIntervalSec=300

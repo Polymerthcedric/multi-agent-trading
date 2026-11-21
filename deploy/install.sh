@@ -2,7 +2,7 @@
 set -e
 
 echo "================================================"
-echo "  Multi-Agent Trading Bot — Production Deploy"
+echo "  Multi-Agent Trading — Paper-Trading Research Deployment"
 echo "================================================"
 echo ""
 
