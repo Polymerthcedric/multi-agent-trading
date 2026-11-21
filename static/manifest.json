@@ -1,7 +1,7 @@
 {
     "name": "Multi-Agent Trading Dashboard",
     "short_name": "TradeBot",
-    "description": "Autonomous multi-agent trading system for gold, silver, forex, stocks & ETFs",
+    "description": "Paper-trading research dashboard for exploring multi-agent trading signals.",
     "start_url": "/",
     "display": "standalone",
     "background_color": "#0f172a",
