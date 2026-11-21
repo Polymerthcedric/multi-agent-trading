@@ -2,6 +2,12 @@
 
 A Python research project for exploring trading signals, search, and risk controls. The dashboard reads market data where available and uses a paper-trading connector with a virtual balance. It does not make live trades or promise returns.
 
+## Research dashboard
+
+The hosted dashboard is a demo of this research prototype: [https://multi-agent-trading-epvurxxuzcdm3j3opza3tu.streamlit.app/](https://multi-agent-trading-epvurxxuzcdm3j3opza3tu.streamlit.app/).
+
+It shows simulated orders and a virtual balance. It places no live exchange orders. Synthetic demo data is not market evidence. The app may require Streamlit account access.
+
 ## Run locally
 
 Use Python 3.10 or newer:
