@@ -1,6 +1,6 @@
 # Multi-Agent Trading
 
-A Python research project for exploring trading signals, search, and risk controls. The dashboard reads market data where available and uses a paper-trading connector with a virtual balance. It does not make live trades or promise returns.
+A Python research project for exploring trading signals, search, and risk controls. The dashboard reads market data where available and uses a paper-trading connector with a virtual balance. The project is paper trading only. It does not make live trades or promise returns.
 
 ## Research dashboard
 
