@@ -20,11 +20,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from engine.evaluator import StateEvaluator  # noqa: E402
 from engine.walk_forward import (  # noqa: E402
+    DEFAULT_EVALUATOR_GRID,
     WalkForwardConfig,
     WalkForwardValidator,
     build_folds,
     run_backtest,
 )
+
+
+def test_legacy_evaluator_grid_does_not_vary_an_inactive_parameter():
+    risk_settings = {params.risk_aversion for params in DEFAULT_EVALUATOR_GRID}
+    decision_settings = {
+        (params.drawdown_penalty, params.position_conviction_bonus)
+        for params in DEFAULT_EVALUATOR_GRID
+    }
+
+    assert risk_settings == {3.0}
+    assert len(decision_settings) == len(DEFAULT_EVALUATOR_GRID)
 
 
 def _trend_bars(n: int, *, trend: float = 0.002, amp: float = 0.005, base: float = 100.0) -> List[Dict[str, Any]]:
