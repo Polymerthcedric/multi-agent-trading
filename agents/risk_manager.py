@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import time
 from dataclasses import asdict, dataclass, field
@@ -23,6 +24,34 @@ MAX_TRADES_PER_DAY: int = 15
 WEEKLY_LOSS_LIMIT: float = 0.05
 KILL_SWITCH_DRAWDOWN: float = 0.07
 MIN_RISK_REWARD_RATIO: float = 1.5
+
+
+def consensus_action(
+    prediction_direction: object,
+    context_alignment: object,
+    confidence: object,
+    confidence_threshold: float,
+) -> str:
+    try:
+        confidence_value = float(confidence)
+    except (TypeError, ValueError, OverflowError):
+        return "HOLD"
+    if not math.isfinite(confidence_value) or confidence_value < confidence_threshold:
+        return "HOLD"
+    if (
+        isinstance(prediction_direction, str)
+        and prediction_direction.lower() == "bullish"
+        and context_alignment == "bullish"
+    ):
+        return "BUY"
+    if (
+        isinstance(prediction_direction, str)
+        and prediction_direction.lower() == "bearish"
+        and context_alignment == "bearish"
+    ):
+        return "SELL"
+    return "HOLD"
+
 
 LEARNED_PARAMS_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "config", "learned_parameters.json",
@@ -223,12 +252,9 @@ class RiskManager:
             return AllocationDecision(action="HOLD", symbol=symbol, allocation_pct=0.0, stop_loss=0.0,
                 reasoning={**reasoning, "deny_reason": "low_confidence"})
 
-        direction = "HOLD"
-        if isinstance(pred_dir, str) and isinstance(ctx_align, str):
-            if pred_dir.lower() == "bullish" and ctx_align == "bullish":
-                direction = "BUY"
-            elif pred_dir.lower() == "bearish" and ctx_align == "bearish":
-                direction = "SELL"
+        direction = consensus_action(
+            pred_dir, ctx_align, pred_conf, self._confidence_threshold,
+        )
 
         if direction == "HOLD":
             return AllocationDecision(action="HOLD", symbol=symbol, allocation_pct=0.0, stop_loss=0.0,

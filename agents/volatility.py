@@ -27,7 +27,7 @@ class VolatilityAgent:
         self._low_vol_threshold = 0.15
         self._high_vol_threshold = 0.35
 
-    async def analyze(self, market_data: Dict[str, float]) -> VolatilityResult:
+    def analyze_sync(self, market_data: Dict[str, float]) -> VolatilityResult:
         price = market_data.get("price", 0.0)
         high = market_data.get("high", price * 1.01)
         low = market_data.get("low", price * 0.99)
@@ -95,3 +95,6 @@ class VolatilityAgent:
             z_score=round(z_score, 4),
             reasoning=reasoning,
         )
+
+    async def analyze(self, market_data: Dict[str, float]) -> VolatilityResult:
+        return self.analyze_sync(market_data)

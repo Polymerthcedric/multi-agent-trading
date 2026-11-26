@@ -134,6 +134,12 @@ def load_bars(path: str) -> List[Dict[str, Any]]:
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--symbols", nargs="+", default=SYMBOLS_TO_TEST)
+    parser.add_argument(
+        "--strategy",
+        choices=("multi_agent", "state_evaluator"),
+        default="multi_agent",
+        help="fixed paper-agent policy (default) or the legacy StateEvaluator research model",
+    )
     parser.add_argument("--bars", metavar="PATH", help="local CSV/JSON bar series (no network calls)")
     parser.add_argument("--demo-bars", type=int, default=240, help="synthetic bars per DEMO symbol")
     parser.add_argument("--train-window", type=int, default=60)
@@ -153,7 +159,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
 
 def run_validation(args: argparse.Namespace) -> Dict[str, Any]:
     """Validate each symbol against one series; return a JSON-ready report."""
-    from engine.walk_forward import WalkForwardConfig, WalkForwardValidator
+    from engine.walk_forward import (
+        PolicyWalkForwardValidator,
+        WalkForwardConfig,
+        WalkForwardValidator,
+    )
 
     config = WalkForwardConfig(
         train_window=args.train_window,
@@ -164,31 +174,56 @@ def run_validation(args: argparse.Namespace) -> Dict[str, Any]:
         commission_pct=args.commission_pct,
         annual_factor=args.annual_factor,
     )
-    validator = WalkForwardValidator(config)
+    legacy_validator = WalkForwardValidator(config)
     local_bars = load_bars(args.bars) if args.bars else None
     data_source = f"LOCAL_FILE:{args.bars}" if args.bars else "SYNTHETIC_DEMO"
 
     per_symbol: Dict[str, Dict[str, Any]] = {}
     for symbol in args.symbols:
         bars = local_bars if local_bars is not None else generate_demo_bars(symbol, args.demo_bars)
+        if args.strategy == "multi_agent":
+            from agents.research_policy import MultiAgentResearchPolicy
+
+            validator = PolicyWalkForwardValidator(
+                lambda symbol=symbol: MultiAgentResearchPolicy(symbol),
+                config,
+                strategy=MultiAgentResearchPolicy.name,
+            )
+        else:
+            validator = legacy_validator
         report = validator.validate(bars, symbol=symbol, data_source=data_source)
         per_symbol[symbol] = report.as_dict()
 
         if not report.folds:
             logger.warning("%s: %s", symbol, report.reason)
             continue
-        for fold in report.folds:
-            logger.info(
-                "%s fold %d [%d:%d] -> [%d:%d] params=%s | train Sharpe=%.3f test Sharpe=%.3f "
-                "test net=$%.2f trades=%d",
-                symbol, fold.window.fold,
-                fold.window.train_start, fold.window.train_end,
-                fold.window.test_start, fold.window.test_end,
-                fold.chosen_params.as_dict(),
-                fold.train.sharpe, fold.test.sharpe,
-                fold.test.net_pnl, fold.test.trade_count,
-            )
-        logger.info("%s aggregate: %s", symbol, report.aggregate.as_dict())
+        if args.strategy == "multi_agent":
+            for fold in report.folds:
+                logger.info(
+                    "%s fold %d [%d:%d] -> [%d:%d] | in-sample Sharpe=%.3f "
+                    "OOS Sharpe=%.3f OOS net=$%.2f trades=%d",
+                    symbol, fold.window.fold,
+                    fold.window.train_start, fold.window.train_end,
+                    fold.window.test_start, fold.window.test_end,
+                    fold.in_sample.sharpe, fold.out_of_sample.sharpe,
+                    fold.out_of_sample.net_pnl, fold.out_of_sample.trade_count,
+                )
+            payload = report.as_dict()
+            logger.info("%s aggregate: %s", symbol, payload["aggregate"])
+            logger.info("%s OOS baselines: %s", symbol, payload["benchmarks"])
+        else:
+            for fold in report.folds:
+                logger.info(
+                    "%s fold %d [%d:%d] -> [%d:%d] params=%s | train Sharpe=%.3f test Sharpe=%.3f "
+                    "test net=$%.2f trades=%d",
+                    symbol, fold.window.fold,
+                    fold.window.train_start, fold.window.train_end,
+                    fold.window.test_start, fold.window.test_end,
+                    fold.chosen_params.as_dict(),
+                    fold.train.sharpe, fold.test.sharpe,
+                    fold.test.net_pnl, fold.test.trade_count,
+                )
+            logger.info("%s aggregate: %s", symbol, report.aggregate.as_dict())
 
     degradations = [
         r["aggregate"]["mean_sharpe_degradation"] for r in per_symbol.values() if r["folds"]
@@ -196,6 +231,7 @@ def run_validation(args: argparse.Namespace) -> Dict[str, Any]:
     return {
         "timestamp": time.time(),
         "disclaimer": disclaimer_for(args.bars),
+        "strategy": args.strategy,
         "data_source": data_source,
         "config": config.as_dict(),
         "symbols": per_symbol,
@@ -207,6 +243,7 @@ def run_validation(args: argparse.Namespace) -> Dict[str, Any]:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
+    logging.getLogger("agents").setLevel(logging.WARNING)
     logger.info("=" * 70)
     logger.info("WALK-FORWARD OUT-OF-SAMPLE VALIDATION")
     logger.info("%s", disclaimer_for(args.bars))

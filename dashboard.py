@@ -220,14 +220,14 @@ def render_agent_panel(results, search_results):
     dt_acc = dt.get("accuracy", 0.0)
     dt_roll = dt.get("total_rollouts", 0)
     with c5:
-        st.markdown(f"""<div class="agent-card search"><small style="color:#10b981;">SEARCH ENGINE</small><br>
+        st.markdown(f"""<div class="agent-card search"><small style="color:#10b981;">EXPERIMENTAL MCTS — NOT A SIGNAL</small><br>
             <span class="{sa_cls}" style="font-size:18px;">{sa}</span><br>
             <span>Score: <b>{ss:.4f}</b></span>
             <span style="font-size:11px;color:#94a3b8;">Sims: {sr.get("metrics",{}).get("simulations_run",0)}</span>
             <span style="font-size:11px;color:#94a3b8;">DirMatch: {dt_acc:.1%} ({dt_roll} rollouts)</span></div>""", unsafe_allow_html=True)
 
     with st.expander("Raw Reasoning"):
-        t1, t2, t3, t4, t5 = st.tabs(["Predictive","Context","Volatility","Risk","Search"])
+        t1, t2, t3, t4, t5 = st.tabs(["Predictive","Context","Volatility","Risk","MCTS demo"])
         with t1: st.json(pd_["reasoning"])
         with t2: st.json(cd["reasoning"])
         with t3: st.json(vd["reasoning"])
@@ -318,7 +318,8 @@ def main():
     st.sidebar.markdown("### Stocks & ETFs")
     st.sidebar.markdown("- AAPL\n- MSFT\n- GOOGL\n- SPY\n- QQQ")
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### Search Engine Config")
+    st.sidebar.markdown("### Experimental MCTS Demo")
+    st.sidebar.caption("Heuristic search only; not used for paper orders or out-of-sample validation.")
     sd = st.sidebar.slider("Search Depth", 2, 10, 5, key="search_depth")
     ns = st.sidebar.slider("Simulations", 20, 500, 80, step=10, key="n_sims")
 
@@ -346,7 +347,7 @@ def main():
     st.markdown(f"<div style='display:flex;justify-content:space-between;color:#94a3b8;margin-bottom:8px;'>"
         f"<span>Updated: {last}</span><span>TV (1h) | Paper: ${bal.total_equity:,.2f}</span></div>", unsafe_allow_html=True)
 
-    t_market, t_agents, t_portfolio, t_hist, t_risk = st.tabs(["Market", "Agents + Search", "Portfolio", "Backtest", "Risk Monitor"])
+    t_market, t_agents, t_portfolio, t_hist, t_risk = st.tabs(["Market", "Agents + Experimental MCTS", "Portfolio", "Backtest", "Risk Monitor"])
 
     with t_market:
         cols = st.columns(3)

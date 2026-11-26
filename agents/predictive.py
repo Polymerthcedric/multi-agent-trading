@@ -18,7 +18,7 @@ class PredictionResult:
 class PredictiveAgent:
     name: str = "predictive_agent"
 
-    async def analyze(self, market_data: Dict[str, float]) -> PredictionResult:
+    def analyze_sync(self, market_data: Dict[str, float]) -> PredictionResult:
         sma = market_data.get("sma", 0.0)
         rsi = market_data.get("rsi", 50.0)
         ema = market_data.get("ema", 0.0)
@@ -121,3 +121,6 @@ class PredictiveAgent:
             confidence=round(confidence, 4),
             reasoning=reasoning,
         )
+
+    async def analyze(self, market_data: Dict[str, float]) -> PredictionResult:
+        return self.analyze_sync(market_data)

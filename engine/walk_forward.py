@@ -1,11 +1,9 @@
-"""Deterministic, offline walk-forward validation for ``StateEvaluator`` params.
+"""Deterministic, offline walk-forward validation for fixed policies and evaluators.
 
-The validator takes ONE chronological series of bar dicts (the same shape as
-``connectors.historical.HistoricalDataFeed`` output) and slices it into folds.
-Every fold tunes the evaluator on its TRAIN window only and then scores the
-following TEST window exactly once.  Test bars therefore never influence the
-parameter choice; a later fold may train on an earlier fold's test window,
-which is normal walk-forward retraining and is not lookahead.
+Both validators take ONE chronological series of bar dicts and slice it into
+folds. ``WalkForwardValidator`` tunes ``StateEvaluator`` on each TRAIN window;
+``PolicyWalkForwardValidator`` keeps the supplied decision policy fixed and
+compares it with baselines. Neither path uses test bars for parameter choice.
 
 Folds are ROLLING by default (the train window slides forward by ``step``).
 ``mode="expanding"`` keeps the train start fixed and grows the train window.
@@ -14,9 +12,9 @@ Test windows are non-overlapping because ``step >= test_window`` is enforced.
 seed causal indicators; they are never traded or tuned on.
 
 Signals are computed from a bar's close (using trailing features only) and
-filled at the NEXT bar's open, avoiding same-bar execution lookahead.  The
-kernel is long/flat with a per-position notional cap and tracks slippage and
-commission separately so gross and net PnL can be reconciled exactly.
+filled at the NEXT bar's open, avoiding same-bar execution lookahead. The
+shared kernel is long/flat with a per-position notional cap and tracks
+slippage and commission separately so gross and net PnL can be reconciled.
 
 Known limitation: ``StateEvaluator.risk_aversion`` is currently accepted by
 the evaluator but not used inside ``evaluate()``.  It is exposed in the grid
@@ -30,7 +28,7 @@ import math
 import statistics
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence, Tuple
 
 from engine.evaluator import StateEvaluator
 from engine.state import MarketState
@@ -38,6 +36,10 @@ from engine.state import MarketState
 SLIPPAGE_BPS = 2.0
 COMMISSION_PCT = 0.001
 DEFAULT_ANNUAL_FACTOR = 252.0 * 6.5  # hourly bars, as used by the old OOS script
+
+
+class DecisionPolicy(Protocol):
+    def decide(self, market_data: Dict[str, float]) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -65,7 +67,6 @@ class EvaluatorParams:
 
 DEFAULT_EVALUATOR_GRID: Tuple[EvaluatorParams, ...] = (
     EvaluatorParams(3.0, 2.0, 0.3),
-    EvaluatorParams(1.0, 2.0, 0.3),
     EvaluatorParams(3.0, 0.0, 0.3),
     EvaluatorParams(3.0, 8.0, 0.3),
     EvaluatorParams(3.0, 2.0, 0.0),
@@ -81,7 +82,7 @@ class WalkForwardConfig:
     warmup: int = 50
     mode: str = "rolling"  # "rolling" | "expanding"
     initial_capital: float = 100_000.0
-    position_size_pct: float = 0.25
+    position_size_pct: float = 0.20
     slippage_bps: float = SLIPPAGE_BPS
     commission_pct: float = COMMISSION_PCT
     buy_threshold: float = 1.5
@@ -271,6 +272,96 @@ class WalkForwardReport:
         }
 
 
+@dataclass(frozen=True)
+class PolicyFoldResult:
+    window: FoldWindow
+    in_sample: BacktestResult
+    out_of_sample: BacktestResult
+    benchmarks: Dict[str, BacktestResult] = field(default_factory=dict)
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            **self.window.as_dict(),
+            "in_sample": self.in_sample.as_dict(),
+            "out_of_sample": self.out_of_sample.as_dict(),
+            "benchmarks": {
+                name: result.as_dict() for name, result in self.benchmarks.items()
+            },
+        }
+
+
+@dataclass(frozen=True)
+class PolicyWalkForwardReport:
+    config: WalkForwardConfig
+    folds: List[PolicyFoldResult] = field(default_factory=list)
+    symbol: str = ""
+    data_source: str = ""
+    strategy: str = ""
+    reason: str = ""
+
+    def as_dict(self) -> Dict[str, Any]:
+        results = [fold.out_of_sample for fold in self.folds]
+        in_sample = [fold.in_sample for fold in self.folds]
+        in_sample_summary = _summarize_results(in_sample)
+        out_of_sample_summary = _summarize_results(results)
+        sharpe_degradations = [
+            fold.out_of_sample.sharpe - fold.in_sample.sharpe for fold in self.folds
+        ]
+        pnl_degradations = [
+            fold.out_of_sample.net_pnl - fold.in_sample.net_pnl for fold in self.folds
+        ]
+        benchmark_results: Dict[str, List[BacktestResult]] = {}
+        for fold in self.folds:
+            for name, result in fold.benchmarks.items():
+                benchmark_results.setdefault(name, []).append(result)
+        total_costs = sum(r.total_costs for r in in_sample + results)
+        config = self.config.as_dict()
+        config.pop("buy_threshold", None)
+        config.pop("sell_threshold", None)
+        config.pop("evaluator_grid", None)
+        return {
+            "symbol": self.symbol,
+            "data_source": self.data_source,
+            "strategy": self.strategy,
+            "reason": self.reason,
+            "config": config,
+            "tuning": "none; the policy remains fixed across all folds",
+            "fold_count": len(self.folds),
+            "in_sample": in_sample_summary,
+            "out_of_sample": out_of_sample_summary,
+            "aggregate": {
+                "fold_count": len(self.folds),
+                "mean_train_sharpe": in_sample_summary["mean_sharpe"],
+                "mean_test_sharpe": out_of_sample_summary["mean_sharpe"],
+                "mean_sharpe_degradation": (
+                    round(statistics.fmean(sharpe_degradations), 6)
+                    if sharpe_degradations else 0.0
+                ),
+                "median_sharpe_degradation": (
+                    round(statistics.median(sharpe_degradations), 6)
+                    if sharpe_degradations else 0.0
+                ),
+                "mean_net_pnl_degradation": (
+                    round(statistics.fmean(pnl_degradations), 6)
+                    if pnl_degradations else 0.0
+                ),
+                "median_net_pnl_degradation": (
+                    round(statistics.median(pnl_degradations), 6)
+                    if pnl_degradations else 0.0
+                ),
+                "mean_train_max_drawdown": in_sample_summary["mean_max_drawdown"],
+                "mean_test_max_drawdown": out_of_sample_summary["mean_max_drawdown"],
+                "total_trades": sum(r.trade_count for r in in_sample + results),
+                "total_costs": round(total_costs, 6),
+            },
+            "benchmarks": {
+                name: _summarize_results(values)
+                for name, values in benchmark_results.items()
+            },
+            "folds": [fold.as_dict() for fold in self.folds],
+        }
+
+
 def _as_float(value: Any, default: Optional[float] = None) -> Optional[float]:
     try:
         result = float(value)
@@ -345,10 +436,23 @@ def _build_features(bars: Sequence[Dict[str, float]]) -> List[Dict[str, float]]:
     """Causal indicators: bar i only ever uses closes/highs/lows up to i."""
     closes = [b["close"] for b in bars]
     features: List[Dict[str, float]] = []
+    macd_values: List[float] = []
     for i, bar in enumerate(bars):
         prior = closes[max(0, i - 50):i]
         window20 = closes[max(0, i - 20):i] or [bar["close"]]
         window10 = closes[max(0, i - 10):i] or [bar["close"]]
+        current_window20 = closes[max(0, i - 19):i + 1]
+        fast_window = closes[max(0, i - 11):i + 1]
+        slow_window = closes[max(0, i - 25):i + 1]
+        macd = sum(fast_window) / len(fast_window) - sum(slow_window) / len(slow_window)
+        macd_values.append(macd)
+        macd_signal_window = macd_values[max(0, i - 8):i + 1]
+        band_mean = sum(current_window20) / len(current_window20)
+        band_std = math.sqrt(
+            sum((close - band_mean) ** 2 for close in current_window20)
+            / len(current_window20)
+        )
+        current_bars = bars[max(0, i - 19):i + 1]
 
         deltas = [closes[j] - closes[j - 1] for j in range(max(1, i - 13), i + 1)]
         gains = sum(d for d in deltas if d > 0) / len(deltas) if deltas else 0.0
@@ -368,6 +472,12 @@ def _build_features(bars: Sequence[Dict[str, float]]) -> List[Dict[str, float]]:
             "rsi": min(100.0, max(0.0, rsi)),
             "atr": atr,
             "momentum": momentum,
+            "macd": macd,
+            "macd_signal": sum(macd_signal_window) / len(macd_signal_window),
+            "bb_upper": band_mean + 2.0 * band_std,
+            "bb_lower": band_mean - 2.0 * band_std,
+            "historical_support": min(b["low"] for b in current_bars),
+            "historical_resistance": max(b["high"] for b in current_bars),
             "adx": 20.0,
             "volume": bar["volume"],
             "prior_closes": prior,
@@ -408,11 +518,14 @@ def _run_kernel(
     features: Sequence[Dict[str, float]],
     start: int,
     end: int,
-    evaluator: StateEvaluator,
+    evaluator: Optional[StateEvaluator],
     config: WalkForwardConfig,
     symbol: str,
+    policy: Optional[DecisionPolicy] = None,
 ) -> BacktestResult:
     """Long/flat backtest over ``bars[start:end]`` with next-open execution."""
+    if evaluator is None and policy is None:
+        raise ValueError("an evaluator or decision policy is required")
     if end <= start or start < 0 or end > len(bars):
         return _empty_result()
 
@@ -432,6 +545,14 @@ def _run_kernel(
     state.price_history = list(seed_closes)
 
     slippage = config.slippage_bps / 10_000.0
+
+    if policy is not None:
+        for index in range(start):
+            warmup_data = dict(features[index])
+            warmup_data.pop("prior_closes", None)
+            action = policy.decide(warmup_data)
+            if action not in ("BUY", "SELL", "HOLD"):
+                raise ValueError(f"policy returned unsupported action: {action!r}")
 
     for i in range(start, end):
         bar = bars[i]
@@ -486,12 +607,21 @@ def _run_kernel(
         md = dict(features[i])
         md.pop("prior_closes", None)
         new_state = MarketState.from_market_data(symbol, md, state=state)
-        score = evaluator.evaluate(new_state.to_vector())
-
-        if score > config.buy_threshold and position <= 0:
-            pending = "BUY"
-        elif score < config.sell_threshold and position > 0:
-            pending = "SELL"
+        if policy is not None:
+            action = policy.decide(md)
+            if action not in ("BUY", "SELL", "HOLD"):
+                raise ValueError(f"policy returned unsupported action: {action!r}")
+            if action == "BUY" and position <= 0:
+                pending = "BUY"
+            elif action == "SELL" and position > 0:
+                pending = "SELL"
+        else:
+            assert evaluator is not None
+            score = evaluator.evaluate(new_state.to_vector())
+            if score > config.buy_threshold and position <= 0:
+                pending = "BUY"
+            elif score < config.sell_threshold and position > 0:
+                pending = "SELL"
         state = new_state
 
     final_equity = equity[-1]
@@ -526,6 +656,28 @@ def run_backtest(
     features = _build_features(prepared)
     stop = len(prepared) if end is None else min(end, len(prepared))
     return _run_kernel(prepared, features, max(0, start), stop, evaluator, cfg, symbol)
+
+
+def run_policy_backtest(
+    bars: Sequence[Dict[str, Any]],
+    policy_factory: Callable[[], DecisionPolicy],
+    *,
+    config: Optional[WalkForwardConfig] = None,
+    symbol: str = "",
+    start: int = 0,
+    end: Optional[int] = None,
+) -> BacktestResult:
+    """Run a deterministic decision policy through the same cost/fill kernel."""
+    cfg = config or WalkForwardConfig()
+    prepared = _prepare_bars(bars)
+    if not prepared:
+        return _empty_result()
+    features = _build_features(prepared)
+    stop = len(prepared) if end is None else min(end, len(prepared))
+    return _run_kernel(
+        prepared, features, max(0, start), stop, None, cfg, symbol,
+        policy=policy_factory(),
+    )
 
 
 def build_folds(n_bars: int, config: Optional[WalkForwardConfig] = None) -> List[FoldWindow]:
@@ -578,6 +730,105 @@ def _aggregate(folds: Sequence[FoldResult]) -> AggregateMetrics:
         total_trades=sum(f.train.trade_count + f.test.trade_count for f in folds),
         total_costs=sum(f.train.total_costs + f.test.total_costs for f in folds),
     )
+
+
+def _summarize_results(results: Sequence[BacktestResult]) -> Dict[str, Any]:
+    return {
+        "fold_count": len(results),
+        "mean_sharpe": round(statistics.fmean(r.sharpe for r in results), 6) if results else 0.0,
+        "median_sharpe": round(statistics.median(r.sharpe for r in results), 6) if results else 0.0,
+        "mean_net_pnl": round(statistics.fmean(r.net_pnl for r in results), 6) if results else 0.0,
+        "median_net_pnl": round(statistics.median(r.net_pnl for r in results), 6) if results else 0.0,
+        "mean_max_drawdown": round(statistics.fmean(r.max_drawdown for r in results), 6) if results else 0.0,
+        "total_trades": sum(r.trade_count for r in results),
+        "total_costs": round(sum(r.total_costs for r in results), 6),
+    }
+
+
+class BuyAndHoldPolicy:
+    def decide(self, market_data: Dict[str, float]) -> str:
+        return "BUY"
+
+
+class CashPolicy:
+    def decide(self, market_data: Dict[str, float]) -> str:
+        return "HOLD"
+
+
+class PolicyWalkForwardValidator:
+    """Evaluate one fixed policy on chronological folds without fitting on test bars."""
+
+    def __init__(
+        self,
+        policy_factory: Callable[[], DecisionPolicy],
+        config: Optional[WalkForwardConfig] = None,
+        *,
+        strategy: str = "",
+        benchmark_factories: Optional[Dict[str, Callable[[], DecisionPolicy]]] = None,
+    ) -> None:
+        self.policy_factory = policy_factory
+        self.config = config or WalkForwardConfig()
+        self.strategy = strategy or getattr(policy_factory, "__name__", "fixed-policy")
+        self.benchmark_factories = (
+            benchmark_factories
+            if benchmark_factories is not None
+            else {"buy_and_hold": BuyAndHoldPolicy, "cash": CashPolicy}
+        )
+
+    def validate(
+        self,
+        bars: Optional[Sequence[Dict[str, Any]]],
+        *,
+        symbol: str = "",
+        data_source: str = "",
+    ) -> PolicyWalkForwardReport:
+        prepared = _prepare_bars(bars)
+        windows = build_folds(len(prepared), self.config)
+        if not windows:
+            required = (
+                self.config.warmup
+                + self.config.train_window
+                + self.config.test_window
+            )
+            return PolicyWalkForwardReport(
+                config=self.config,
+                symbol=symbol,
+                data_source=data_source,
+                strategy=self.strategy,
+                reason=f"insufficient_bars: need {required}, got {len(prepared)}",
+            )
+
+        features = _build_features(prepared)
+        folds: List[PolicyFoldResult] = []
+        for window in windows:
+            in_sample = _run_kernel(
+                prepared, features, window.train_start, window.train_end,
+                None, self.config, symbol, policy=self.policy_factory(),
+            )
+            out_of_sample = _run_kernel(
+                prepared, features, window.test_start, window.test_end,
+                None, self.config, symbol, policy=self.policy_factory(),
+            )
+            benchmarks = {
+                name: _run_kernel(
+                    prepared, features, window.test_start, window.test_end,
+                    None, self.config, symbol, policy=factory(),
+                )
+                for name, factory in self.benchmark_factories.items()
+            }
+            folds.append(PolicyFoldResult(
+                window=window,
+                in_sample=in_sample,
+                out_of_sample=out_of_sample,
+                benchmarks=benchmarks,
+            ))
+        return PolicyWalkForwardReport(
+            config=self.config,
+            folds=folds,
+            symbol=symbol,
+            data_source=data_source,
+            strategy=self.strategy,
+        )
 
 
 class WalkForwardValidator:
@@ -659,13 +910,20 @@ __all__ = [
     "COMMISSION_PCT",
     "AggregateMetrics",
     "BacktestResult",
+    "BuyAndHoldPolicy",
+    "CashPolicy",
+    "DecisionPolicy",
     "EvaluatorParams",
     "FoldResult",
     "FoldWindow",
+    "PolicyFoldResult",
+    "PolicyWalkForwardReport",
+    "PolicyWalkForwardValidator",
     "TuningCandidate",
     "WalkForwardConfig",
     "WalkForwardReport",
     "WalkForwardValidator",
     "build_folds",
     "run_backtest",
+    "run_policy_backtest",
 ]

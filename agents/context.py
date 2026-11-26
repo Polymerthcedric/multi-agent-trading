@@ -25,7 +25,7 @@ class ContextAgent:
         self._price_history: List[float] = []
         self._lookback = lookback
 
-    async def analyze(self, market_data: Dict[str, float]) -> ContextResult:
+    def analyze_sync(self, market_data: Dict[str, float]) -> ContextResult:
         price = market_data.get("price", 0.0)
         support = market_data.get("historical_support", price * 0.97)
         resistance = market_data.get("historical_resistance", price * 1.03)
@@ -120,3 +120,6 @@ class ContextAgent:
         consistency = positive / len(returns) if returns else 0.5
         trend = abs(mean_r) * 100
         return min(1.0, trend * consistency)
+
+    async def analyze(self, market_data: Dict[str, float]) -> ContextResult:
+        return self.analyze_sync(market_data)

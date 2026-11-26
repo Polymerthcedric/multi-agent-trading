@@ -18,7 +18,6 @@ from agents.decision_log import DecisionLogger, DecisionRecord
 from agents.risk_manager import RiskManager
 from connectors.platform import PaperTradingConnector, OrderResult
 from execution.broker import Broker, ACTION_LABEL_TO_INT
-from execution.engine import SearchEngine
 from engine.environment import TradingEnvironment
 from engine.ledger import RuntimeLedger, LedgerEntry
 from memory.feedback_loop import TradeLedger, TradeRecord, SelfLearningCritic
@@ -94,9 +93,6 @@ class TradingOrchestrator:
         self._tv_feed = TradingViewFeed(symbols=settings.symbols, mode="PAPER")
         self.connector = PaperTradingConnector(initial_balance=initial_balance, tv_feed=self._tv_feed)
         self.broker = Broker(self.connector)
-        self.search_engine = SearchEngine(
-            max_depth=5, n_simulations=80, time_limit_ms=3000.0, noise_scale=0.015,
-        )
         self.environments: Dict[str, TradingEnvironment] = {
             sym: TradingEnvironment(initial_balance=initial_balance) for sym in settings.symbols
         }
@@ -236,17 +232,6 @@ class TradingOrchestrator:
                         volatility=volatility_result,
                         decision=decision,
                     )
-                else:
-                    try:
-                        await self.search_engine.update_state(symbol, market_data)
-                        search_action, search_score, search_metrics = await self.search_engine.search_best_action(symbol)
-                        logger.info(
-                            "SEARCH symbol=%s action=%s score=%.4f",
-                            symbol, search_action, search_score,
-                        )
-                    except Exception as e:
-                        logger.warning("Search engine error for %s: %s", symbol, e)
-
                 try:
                     balance = await self.connector.get_balance()
                     self.risk.update_portfolio_value(balance.total_equity)
@@ -260,7 +245,6 @@ class TradingOrchestrator:
 
         self.runtime_ledger.save()
         self.trade_ledger.save()
-        self.search_engine.save_metrics()
         self._running = False
         logger.info("Orchestrator | simulation complete — %d trades executed", self._trade_count)
 
@@ -539,7 +523,6 @@ class TradingOrchestrator:
         self._running = False
         self.runtime_ledger.save()
         self.trade_ledger.save()
-        self.search_engine.save_metrics()
         logger.info("Orchestrator | shutdown — ledger saved")
 
 
