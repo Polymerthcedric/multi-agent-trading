@@ -182,6 +182,30 @@ def render_agent_panel(results, search_results):
     pr, cr, vr, dec = results[sym]
     pd_, cd, vd, dd = pr, cr, vr, asdict(dec)
     sr = search_results.get(sym, {})
+    required_fields = {
+        "prediction": (pd_, ("direction", "confidence", "reasoning")),
+        "context": (
+            cd,
+            ("regime", "signal_alignment", "support_level", "resistance_level", "reasoning"),
+        ),
+        "volatility": (
+            vd,
+            ("volatility_regime", "atr", "z_score", "risk_multiplier", "reasoning"),
+        ),
+    }
+    missing_fields = [
+        f"{name}.{field}"
+        for name, (output, fields) in required_fields.items()
+        for field in fields
+        if not isinstance(output, dict) or field not in output
+    ]
+    if missing_fields:
+        reasons = ", ".join(dd.get("reasons", ())) or "agent outputs are incomplete"
+        st.info(
+            f"Agent details unavailable for {sym} (missing {', '.join(missing_fields)}). "
+            f"Policy action: {dd.get('action', 'HOLD')} ({reasons})."
+        )
+        return
 
     c1, c2, c3, c4, c5 = st.columns(5)
     dc_ = {"Bullish": "green", "Bearish": "red", "Neutral": "gray"}.get(pd_["direction"], "gray")
