@@ -34,6 +34,8 @@ class TradeRecord:
     volatility_regime: str = ""
     agent_confidences: Dict[str, float] = field(default_factory=dict)
     risk_multiplier: float = 1.0
+    entry_fee: float = 0.0
+    exit_fee: float = 0.0
 
 
 class TradeLedger:
@@ -51,12 +53,25 @@ class TradeLedger:
             trade.entry_price, trade.exit_price, trade.pnl,
         )
 
-    def close_trade(self, symbol: str, exit_price: float, exit_time: Optional[float] = None) -> Optional[TradeRecord]:
+    def close_trade(
+        self,
+        symbol: str,
+        exit_price: float,
+        exit_time: Optional[float] = None,
+        *,
+        exit_fee: float = 0.0,
+    ) -> Optional[TradeRecord]:
         for trade in self.trades:
             if trade.symbol == symbol and trade.exit_price == 0.0:
                 trade.exit_price = exit_price
-                trade.pnl = (exit_price - trade.entry_price) * trade.quantity
-                trade.pnl_pct = (exit_price - trade.entry_price) / trade.entry_price if trade.entry_price > 0 else 0.0
+                trade.exit_fee = exit_fee
+                trade.pnl = (
+                    (exit_price - trade.entry_price) * trade.quantity
+                    - trade.entry_fee
+                    - exit_fee
+                )
+                entry_notional = trade.entry_price * trade.quantity + trade.entry_fee
+                trade.pnl_pct = trade.pnl / entry_notional if entry_notional > 0 else 0.0
                 if exit_time:
                     trade.timestamp = exit_time
                 logger.info(

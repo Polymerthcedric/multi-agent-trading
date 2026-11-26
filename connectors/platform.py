@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import logging
 import math
-import random
 import time
 from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
+
+from connectors.tv_datafeed import DataUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ class OrderResult:
     avg_fill_price: float = 0.0
     status: str = ""
     timestamp: float = 0.0
+    commission: float = 0.0
     error: Optional[str] = None
 
 
@@ -51,12 +53,20 @@ class BaseExchangeConnector(ABC):
         ...
 
     @abstractmethod
-    async def get_market_data(self, symbol: str) -> Dict[str, float]:
+    async def get_market_data(self, symbol: str) -> Dict[str, Any]:
         ...
 
     @abstractmethod
     async def execute_order(
-        self, symbol: str, side: str, quantity: float, order_type: str = "market",
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        order_type: str = "market",
+        *,
+        reference_price: Optional[float] = None,
+        fill_price: Optional[float] = None,
+        commission_pct: float = 0.0,
     ) -> OrderResult:
         ...
 
@@ -66,12 +76,6 @@ class BaseExchangeConnector(ABC):
 
 
 class PaperTradingConnector(BaseExchangeConnector):
-    _BASE_PRICES: Dict[str, float] = {
-        "BTC/USD": 52000.0,
-        "ETH/USD": 2800.0,
-        "SOL/USD": 120.0,
-    }
-
     def __init__(self, initial_balance: float = 100000.0, tv_feed: Optional[object] = None) -> None:
         super().__init__(name="paper")
         self._cash: float = initial_balance
@@ -81,6 +85,7 @@ class PaperTradingConnector(BaseExchangeConnector):
         self._equity_curve: deque = deque([initial_balance], maxlen=MAX_EQUITY_POINTS)
         self._is_live = False
         self._tv_feed = tv_feed
+        self._last_prices: Dict[str, float] = {}
 
     @property
     def trade_history(self) -> List[OrderResult]:
@@ -93,30 +98,42 @@ class PaperTradingConnector(BaseExchangeConnector):
             positions=dict(self._positions),
         )
 
-    async def get_market_data(self, symbol: str) -> Dict[str, float]:
-        if self._tv_feed is not None:
-            try:
-                snap = await self._tv_feed.get_snapshot(symbol)
-                return self._tv_feed.to_market_data(symbol, snap)
-            except Exception as e:
-                logger.warning("PaperTrading | TV feed failed, falling back: %s", e)
-        base = self._BASE_PRICES.get(symbol, 100.0)
-        noise = random.uniform(-0.02, 0.02)
-        price = base * (1.0 + noise)
-        return {
-            "symbol": symbol,
-            "price": round(price, 2),
-            "sma": round(base * 0.99, 2),
-            "ema": round(base * 1.005, 2),
-            "rsi": round(random.uniform(25, 75), 2),
-            "high": round(price * 1.015, 2),
-            "low": round(price * 0.985, 2),
-            "historical_support": round(base * 0.93, 2),
-            "historical_resistance": round(base * 1.07, 2),
-        }
+    async def get_market_data(self, symbol: str) -> Dict[str, Any]:
+        if self._tv_feed is None:
+            raise DataUnavailableError(
+                f"No market-data feed configured for paper trading {symbol}"
+            )
+        try:
+            snap = await self._tv_feed.get_snapshot(symbol)
+            if snap is None or getattr(snap, "is_stale", False):
+                raise DataUnavailableError(f"Fresh market data unavailable for {symbol}")
+            market_data = self._tv_feed.to_market_data(symbol, snap)
+        except Exception as error:
+            if isinstance(error, DataUnavailableError):
+                raise
+            raise DataUnavailableError(
+                f"Market-data request failed for {symbol}: {error}"
+            ) from error
+
+        price = market_data.get("price")
+        if isinstance(price, bool) or not isinstance(price, (int, float)):
+            raise DataUnavailableError(f"Market-data price is invalid for {symbol}")
+        if not math.isfinite(price) or price <= 0:
+            raise DataUnavailableError(f"Market-data price is invalid for {symbol}")
+        self._last_prices[symbol] = float(price)
+        market_data["is_stale"] = False
+        return market_data
 
     async def execute_order(
-        self, symbol: str, side: str, quantity: float, order_type: str = "market",
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        order_type: str = "market",
+        *,
+        reference_price: Optional[float] = None,
+        fill_price: Optional[float] = None,
+        commission_pct: float = 0.0,
     ) -> OrderResult:
         self._order_id_counter += 1
         order_id = f"paper_{self._order_id_counter}"
@@ -139,23 +156,44 @@ class PaperTradingConnector(BaseExchangeConnector):
         if quantity < MIN_QUANTITY:
             return reject(f"quantity {quantity:.8f} below minimum {MIN_QUANTITY}")
 
-        price_data = await self.get_market_data(symbol)
-        fill_price = float(price_data.get("price", 0.0))
+        if isinstance(commission_pct, bool) or not isinstance(commission_pct, (int, float)):
+            return reject(f"invalid commission rate: {commission_pct!r}")
+        if not math.isfinite(commission_pct) or commission_pct < 0 or commission_pct >= 1:
+            return reject(f"invalid commission rate: {commission_pct!r}")
+        if fill_price is None:
+            try:
+                price_data = await self.get_market_data(symbol)
+            except DataUnavailableError as error:
+                return reject(str(error))
+            fill_price = float(price_data["price"])
+        if isinstance(fill_price, bool) or not isinstance(fill_price, (int, float)):
+            return reject(f"invalid fill price: {fill_price!r}")
         if not math.isfinite(fill_price) or fill_price <= 0:
-            return reject(f"invalid fill price: {fill_price}", fill_price)
+            return reject(f"invalid fill price: {fill_price}", float(fill_price))
+        fill_price = float(fill_price)
+
+        if reference_price is None:
+            reference_price = fill_price
+        if isinstance(reference_price, bool) or not isinstance(reference_price, (int, float)):
+            return reject(f"invalid reference price: {reference_price!r}", fill_price)
+        if not math.isfinite(reference_price) or reference_price <= 0:
+            return reject(f"invalid reference price: {reference_price}", fill_price)
+        reference_price = float(reference_price)
 
         filled_qty = 0.0
+        commission = 0.0
         if side_lower == "buy":
-            cost = quantity * fill_price
+            cost = quantity * (fill_price + reference_price * commission_pct)
             if cost > self._cash:
-                affordable_qty = self._cash / fill_price
+                affordable_qty = self._cash / (fill_price + reference_price * commission_pct)
                 if affordable_qty < MIN_QUANTITY:
                     return reject(
                         f"insufficient cash: need {cost:.2f}, have {self._cash:.2f}", fill_price,
                     )
                 quantity = affordable_qty
-                cost = quantity * fill_price
+                cost = quantity * (fill_price + reference_price * commission_pct)
                 logger.info("PaperTrading | reduced buy qty to %.6f (cash limited)", quantity)
+            commission = quantity * reference_price * commission_pct
             self._cash -= cost
             self._positions[symbol] = self._positions.get(symbol, 0.0) + quantity
             filled_qty = quantity
@@ -166,7 +204,8 @@ class PaperTradingConnector(BaseExchangeConnector):
                 return reject(
                     f"position too small: have {current:.6f}, want {quantity:.6f}", fill_price,
                 )
-            self._cash += filled_qty * fill_price
+            commission = filled_qty * reference_price * commission_pct
+            self._cash += filled_qty * fill_price - commission
             remaining = current - filled_qty
             if remaining <= 1e-12:
                 self._positions.pop(symbol, None)
@@ -183,7 +222,9 @@ class PaperTradingConnector(BaseExchangeConnector):
             avg_fill_price=fill_price,
             status="filled",
             timestamp=time.time(),
+            commission=commission,
         )
+        self._last_prices[symbol] = fill_price
         self._trade_history.append(result)
         self._equity_curve.append(self._cash + await self._position_value())
         logger.info(
@@ -199,17 +240,17 @@ class PaperTradingConnector(BaseExchangeConnector):
         if not self._positions:
             return 0.0
         total = 0.0
-        if self._tv_feed is not None:
-            for sym, qty in self._positions.items():
-                try:
-                    snap = await self._tv_feed.get_snapshot(sym)
-                    current_price = snap.price if snap and snap.price > 0 else self._BASE_PRICES.get(sym, 100.0)
-                except Exception:
-                    current_price = self._BASE_PRICES.get(sym, 100.0)
-                total += qty * current_price
-        else:
-            for sym, qty in self._positions.items():
-                total += qty * self._BASE_PRICES.get(sym, 100.0)
+        for symbol, quantity in self._positions.items():
+            try:
+                market_data = await self.get_market_data(symbol)
+                current_price = float(market_data["price"])
+            except DataUnavailableError:
+                current_price = self._last_prices.get(symbol, 0.0)
+            if current_price <= 0:
+                raise DataUnavailableError(
+                    f"No valid valuation price available for open position {symbol}"
+                )
+            total += quantity * current_price
         return total
 
 
@@ -238,7 +279,15 @@ class LiveExchangeConnector(BaseExchangeConnector):
         return {"symbol": symbol, "price": 0.0, "sma": 0.0, "ema": 0.0, "rsi": 50.0, "high": 0.0, "low": 0.0}
 
     async def execute_order(
-        self, symbol: str, side: str, quantity: float, order_type: str = "market",
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        order_type: str = "market",
+        *,
+        reference_price: Optional[float] = None,
+        fill_price: Optional[float] = None,
+        commission_pct: float = 0.0,
     ) -> OrderResult:
         logger.warning("LiveExchange | execute_order — stub, not configured")
         return OrderResult(

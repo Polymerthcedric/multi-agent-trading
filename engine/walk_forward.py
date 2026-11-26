@@ -27,10 +27,11 @@ from __future__ import annotations
 import math
 import statistics
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence, Tuple
 
 from engine.evaluator import StateEvaluator
+from engine.policy import PolicyDecision, PortfolioSnapshot, TradingPolicy
 from engine.state import MarketState
 
 SLIPPAGE_BPS = 2.0
@@ -38,8 +39,8 @@ COMMISSION_PCT = 0.001
 DEFAULT_ANNUAL_FACTOR = 252.0 * 6.5  # hourly bars, as used by the old OOS script
 
 
-class DecisionPolicy(Protocol):
-    def decide(self, market_data: Dict[str, float]) -> str: ...
+class DecisionPolicy(TradingPolicy, Protocol):
+    pass
 
 
 @dataclass(frozen=True)
@@ -84,6 +85,7 @@ class WalkForwardConfig:
     initial_capital: float = 100_000.0
     position_size_pct: float = 0.20
     slippage_bps: float = SLIPPAGE_BPS
+    spread_bps: float = 1.0
     commission_pct: float = COMMISSION_PCT
     buy_threshold: float = 1.5
     sell_threshold: float = -1.0
@@ -107,6 +109,8 @@ class WalkForwardConfig:
             raise ValueError("position_size_pct must be in (0, 1]")
         if self.slippage_bps < 0 or self.slippage_bps >= 10_000:
             raise ValueError("slippage_bps must be in [0, 10000)")
+        if self.spread_bps < 0 or self.spread_bps >= 10_000:
+            raise ValueError("spread_bps must be in [0, 10000)")
         if self.commission_pct < 0 or self.commission_pct >= 1:
             raise ValueError("commission_pct must be in [0, 1)")
         if not math.isfinite(self.annual_factor) or self.annual_factor <= 0:
@@ -124,6 +128,7 @@ class WalkForwardConfig:
             "initial_capital": self.initial_capital,
             "position_size_pct": self.position_size_pct,
             "slippage_bps": self.slippage_bps,
+            "spread_bps": self.spread_bps,
             "commission_pct": self.commission_pct,
             "buy_threshold": self.buy_threshold,
             "sell_threshold": self.sell_threshold,
@@ -534,11 +539,18 @@ def _run_kernel(
     entry_price = 0.0  # effective (slipped + commission-inclusive) cost basis
     total_costs = 0.0
     trade_count = 0
+    daily_trade_count = 0
     signals: List[str] = []
     equity = [cash]
     returns: List[float] = []
     peak = cash
-    pending: Optional[str] = None
+    day_key: Optional[Tuple[int, int, int]] = None
+    week_key: Optional[Tuple[int, int]] = None
+    day_start_equity = cash
+    week_start_equity = cash
+    active_stop = 0.0
+    pending_action: Optional[str] = None
+    pending_decision: Optional[PolicyDecision] = None
 
     seed_closes = features[start]["prior_closes"]
     state = MarketState(symbol=symbol, price=seed_closes[-1] if seed_closes else bars[start]["close"])
@@ -550,43 +562,92 @@ def _run_kernel(
         for index in range(start):
             warmup_data = dict(features[index])
             warmup_data.pop("prior_closes", None)
-            action = policy.decide(warmup_data)
-            if action not in ("BUY", "SELL", "HOLD"):
-                raise ValueError(f"policy returned unsupported action: {action!r}")
+            decision = policy.decide(warmup_data, PortfolioSnapshot())
+            if decision.action not in ("BUY", "SELL", "HOLD"):
+                raise ValueError(f"policy returned unsupported action: {decision.action!r}")
 
     for i in range(start, end):
         bar = bars[i]
         current_price = bar["close"]
+        timestamp = bar.get("timestamp", 0.0)
+        if timestamp > 0:
+            date_time = datetime.fromtimestamp(timestamp, timezone.utc)
+            current_day = (date_time.year, date_time.month, date_time.day)
+            iso_date = date_time.isocalendar()
+            current_week = (iso_date.year, iso_date.week)
+            if day_key != current_day:
+                day_key = current_day
+                day_start_equity = equity[-1]
+                daily_trade_count = 0
+            if week_key != current_week:
+                week_key = current_week
+                week_start_equity = equity[-1]
 
         # Execute the signal formed on the previous close at this bar's open.
-        if pending == "BUY" and position <= 0:
+        if pending_action == "BUY" and position <= 0:
             fill = bar["open"]
-            exec_price = fill * (1.0 + slippage)
-            budget = min(equity[-1] * config.position_size_pct, cash / (1.0 + config.commission_pct))
+            half_spread = config.spread_bps / 20_000.0
+            exec_price = fill * (1.0 + slippage + half_spread)
+            target_weight = (
+                min(1.0, max(0.0, pending_decision.allocation_pct))
+                if pending_decision is not None else config.position_size_pct
+            )
+            budget = min(
+                equity[-1] * target_weight,
+                cash / (1.0 + config.commission_pct),
+            )
             qty = budget / exec_price if exec_price > 0 else 0.0
             if qty > 0:
                 commission = qty * exec_price * config.commission_pct
                 slip_cost = qty * fill * slippage
+                spread_cost = qty * fill * half_spread
                 cash -= qty * exec_price + commission
                 position = qty
                 entry_price = exec_price + commission / qty
-                total_costs += commission + slip_cost
+                stop_distance = pending_decision.stop_distance if pending_decision else 0.0
+                active_stop = max(0.0, exec_price - stop_distance) if stop_distance > 0 else 0.0
+                total_costs += commission + slip_cost + spread_cost
                 trade_count += 1
+                daily_trade_count += 1
                 signals.append("BUY")
-        elif pending == "SELL" and position > 0:
+        elif pending_action == "SELL" and position > 0:
             fill = bar["open"]
-            exec_price = fill * (1.0 - slippage)
+            half_spread = config.spread_bps / 20_000.0
+            exec_price = fill * (1.0 - slippage - half_spread)
             if exec_price > 0:  # defensive; config caps slippage below 100%
                 notional = position * exec_price
                 commission = notional * config.commission_pct
                 slip_cost = position * fill * slippage
+                spread_cost = position * fill * half_spread
                 cash += notional - commission
                 position = 0.0
                 entry_price = 0.0
-                total_costs += commission + slip_cost
+                active_stop = 0.0
+                total_costs += commission + slip_cost + spread_cost
                 trade_count += 1
+                daily_trade_count += 1
                 signals.append("SELL")
-        pending = None
+        pending_action = None
+        pending_decision = None
+
+        # A protective stop is checked against the bar low. Gaps through a
+        # stop fill at the open; otherwise the stop itself is the reference.
+        if position > 0 and active_stop > 0 and bar["low"] <= active_stop:
+            fill = min(bar["open"], active_stop)
+            half_spread = config.spread_bps / 20_000.0
+            exec_price = fill * (1.0 - slippage - half_spread)
+            notional = position * exec_price
+            commission = notional * config.commission_pct
+            slip_cost = position * fill * slippage
+            spread_cost = position * fill * half_spread
+            cash += notional - commission
+            position = 0.0
+            entry_price = 0.0
+            active_stop = 0.0
+            total_costs += commission + slip_cost + spread_cost
+            trade_count += 1
+            daily_trade_count += 1
+            signals.append("STOP_SELL")
 
         current_equity = cash + position * current_price
         peak = max(peak, current_equity)
@@ -608,20 +669,50 @@ def _run_kernel(
         md.pop("prior_closes", None)
         new_state = MarketState.from_market_data(symbol, md, state=state)
         if policy is not None:
-            action = policy.decide(md)
-            if action not in ("BUY", "SELL", "HOLD"):
-                raise ValueError(f"policy returned unsupported action: {action!r}")
-            if action == "BUY" and position <= 0:
-                pending = "BUY"
-            elif action == "SELL" and position > 0:
-                pending = "SELL"
+            daily_pnl_pct = (
+                (current_equity - day_start_equity) / day_start_equity
+                if day_start_equity > 0 else 0.0
+            )
+            weekly_pnl_pct = (
+                (current_equity - week_start_equity) / week_start_equity
+                if week_start_equity > 0 else 0.0
+            )
+            portfolio = PortfolioSnapshot(
+                equity=current_equity,
+                cash=cash,
+                position_quantity=position,
+                total_exposure_pct=(
+                    position * current_price / current_equity
+                    if current_equity > 0 else 0.0
+                ),
+                peak_equity=peak,
+                daily_pnl_pct=daily_pnl_pct,
+                weekly_pnl_pct=weekly_pnl_pct,
+                drawdown_pct=(current_equity / peak - 1.0) if peak > 0 else 0.0,
+                daily_trades=daily_trade_count,
+                active_stop_loss=active_stop,
+                allow_new_positions=True,
+            )
+            decision = policy.decide(md, portfolio)
+            if not isinstance(decision, PolicyDecision):
+                raise TypeError("policy must return a PolicyDecision")
+            if decision.action not in ("BUY", "SELL", "HOLD"):
+                raise ValueError(f"policy returned unsupported action: {decision.action!r}")
+            if decision.action == "BUY" and position <= 0:
+                pending_action = "BUY"
+                pending_decision = decision
+            elif decision.action == "SELL" and position > 0:
+                pending_action = "SELL"
+                pending_decision = decision
+            elif position > 0 and decision.stop_loss > active_stop:
+                active_stop = decision.stop_loss
         else:
             assert evaluator is not None
             score = evaluator.evaluate(new_state.to_vector())
             if score > config.buy_threshold and position <= 0:
-                pending = "BUY"
+                pending_action = "BUY"
             elif score < config.sell_threshold and position > 0:
-                pending = "SELL"
+                pending_action = "SELL"
         state = new_state
 
     final_equity = equity[-1]
@@ -746,13 +837,21 @@ def _summarize_results(results: Sequence[BacktestResult]) -> Dict[str, Any]:
 
 
 class BuyAndHoldPolicy:
-    def decide(self, market_data: Dict[str, float]) -> str:
-        return "BUY"
+    def decide(
+        self,
+        market_data: Dict[str, float],
+        portfolio: PortfolioSnapshot,
+    ) -> PolicyDecision:
+        return PolicyDecision(action="BUY", allocation_pct=0.20, signal="BUY")
 
 
 class CashPolicy:
-    def decide(self, market_data: Dict[str, float]) -> str:
-        return "HOLD"
+    def decide(
+        self,
+        market_data: Dict[str, float],
+        portfolio: PortfolioSnapshot,
+    ) -> PolicyDecision:
+        return PolicyDecision(action="HOLD", signal="HOLD")
 
 
 class PolicyWalkForwardValidator:

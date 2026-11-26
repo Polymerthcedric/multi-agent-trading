@@ -7,14 +7,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import sys
-from dataclasses import asdict
 
 from config.settings import Settings
-from agents.predictive import PredictiveAgent
-from agents.context import ContextAgent
-from agents.volatility import VolatilityAgent
-from agents.risk_manager import RiskManager
+from agents.research_policy import MultiAgentResearchPolicy
+from engine.policy import PortfolioSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -26,23 +24,25 @@ async def run_live_check() -> None:
     settings = Settings()
     setup_logging(settings)
 
-    feed = TradingViewFeed(symbols=("BTC/USD", "ETH/USD", "SOL/USD"))
+    feed = TradingViewFeed(symbols=settings.symbols)
     if not feed.is_available():
-        logger.error("tradingview_ta not installed. Run: pip install tradingview-ta")
+        logger.error("No supported market-data provider is installed.")
         sys.exit(1)
 
-    predictive = PredictiveAgent()
-    context = ContextAgent()
-    volatility_map = {sym: VolatilityAgent() for sym in settings.symbols}
-    risk = RiskManager()
+    policies = {
+        symbol: MultiAgentResearchPolicy(symbol) for symbol in settings.symbols
+    }
 
     for symbol in settings.symbols:
         logger.info("=" * 60)
-        logger.info("Testing %s with LIVE TradingView data", symbol)
+        logger.info("Testing %s with public market data", symbol)
         logger.info("=" * 60)
 
         snap = await feed.get_snapshot(symbol)
         market_data = feed.to_market_data(symbol, snap)
+        if market_data.get("is_stale"):
+            logger.warning("Skipping %s: feed returned stale data", symbol)
+            continue
         logger.info(
             "Data: price=%.2f rsi=%.1f sma20=%.2f ema20=%.2f rec=%s",
             market_data["price"], market_data["rsi"],
@@ -50,87 +50,60 @@ async def run_live_check() -> None:
             market_data["recommendation"],
         )
 
-        prediction = await predictive.analyze(market_data)
-        pr = asdict(prediction)
-        logger.info("Predictive: direction=%s confidence=%.4f", pr["direction"], pr["confidence"])
-
-        context_result = await context.analyze(market_data)
-        cr = asdict(context_result)
-        logger.info("Context: regime=%s alignment=%s", cr["regime"], cr["signal_alignment"])
-
-        vol_agent = volatility_map[symbol]
-        volatility_result = await vol_agent.analyze(market_data)
-        vr = asdict(volatility_result)
-        logger.info("Volatility: atr=%.4f regime=%s z_score=%.4f mult=%.4f",
-                     vr["atr"], vr["volatility_regime"], vr["z_score"], vr["risk_multiplier"])
-
-        decision = await risk.evaluate(
-            prediction=pr,
-            context=cr,
-            volatility=vr,
-            market_data=market_data,
+        decision = policies[symbol].decide(market_data, PortfolioSnapshot())
+        logger.info(
+            "Policy preview: signal=%s action=%s allocation=%.2f%% stop=%.2f reasons=%s",
+            decision.signal,
+            decision.action,
+            decision.allocation_pct * 100,
+            decision.stop_loss,
+            ",".join(decision.reasons),
         )
-        logger.info("Risk Decision: action=%s alloc=%.2f%% stop=%.2f",
-                     decision.action, decision.allocation_pct * 100, decision.stop_loss)
 
         logger.info("")
 
-    logger.info("All live tests complete.")
+    logger.info("All market-data policy previews complete; no orders were submitted.")
 
 
 async def run_simulation_check() -> None:
-    from connectors.platform import PaperTradingConnector
-    from execution.broker import Broker, ACTION_LABEL_TO_INT
-    from engine.environment import TradingEnvironment
-    from engine.ledger import RuntimeLedger
-    from memory.feedback_loop import TradeLedger, TradeRecord, SelfLearningCritic
     from logging_config import setup_logging
 
     settings = Settings()
     setup_logging(settings)
 
-    connector = PaperTradingConnector(initial_balance=10000.0)
-    broker = Broker(connector)
-    env = TradingEnvironment(initial_balance=10000.0)
-    runtime_ledger = RuntimeLedger()
-    trade_ledger = TradeLedger()
-    critic = SelfLearningCritic(cadence=5)
+    policies = {
+        symbol: MultiAgentResearchPolicy(symbol) for symbol in settings.symbols
+    }
 
-    predictive = PredictiveAgent()
-    context = ContextAgent()
-    volatility_map = {sym: VolatilityAgent() for sym in settings.symbols}
-    risk = RiskManager(initial_portfolio_value=10000.0)
-    trade_count = 0
-
-    logger.info("Running 10-step simulation with simulated data...")
+    logger.info("Running deterministic synthetic policy smoke check; no orders are possible.")
     for step in range(10):
         for symbol in settings.symbols:
-            market_data = await connector.get_market_data(symbol)
-
-            prediction = await predictive.analyze(market_data)
-            context_result = await context.analyze(market_data)
-            vol_agent = volatility_map[symbol]
-            volatility_result = await vol_agent.analyze(market_data)
-
-            decision = await risk.evaluate(
-                prediction=asdict(prediction),
-                context=asdict(context_result),
-                volatility=asdict(volatility_result),
-                market_data=market_data,
-            )
-
+            price = 100.0 + step * 0.5 + math.sin(step * 0.4)
+            market_data = {
+                "symbol": symbol,
+                "price": price,
+                "sma": price * 0.995,
+                "ema": price * 0.997,
+                "rsi": 55.0,
+                "high": price * 1.01,
+                "low": price * 0.99,
+                "historical_support": price * 0.98,
+                "historical_resistance": price * 1.02,
+                "atr": price * 0.01,
+                "momentum": 0.5,
+                "macd": 0.1,
+                "macd_signal": 0.0,
+                "volume": 1000.0,
+            }
+            decision = policies[symbol].decide(market_data, PortfolioSnapshot())
             if decision.action != "HOLD":
-                trade_count += 1
-                action_int = ACTION_LABEL_TO_INT.get(decision.action, 0)
-                pr = asdict(prediction)
                 logger.info(
-                    "TRADE %d | %s %s alloc=%.2f%% conf=%.4f",
-                    trade_count, symbol, decision.action,
-                    decision.allocation_pct * 100, pr["confidence"],
+                    "PREVIEW step=%d | %s signal=%s action=%s allocation=%.2f%%",
+                    step, symbol, decision.signal, decision.action,
+                    decision.allocation_pct * 100,
                 )
 
-    logger.info("Simulation complete — %d potential trades detected", trade_count)
-    runtime_ledger.save()
+    logger.info("Synthetic policy smoke check complete; its output is not performance evidence.")
 
 
 async def main() -> None:
