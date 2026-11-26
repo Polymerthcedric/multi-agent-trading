@@ -9,11 +9,8 @@ import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
 
-from config.settings import Settings
-from agents.predictive import PredictiveAgent
-from agents.context import ContextAgent
-from agents.volatility import VolatilityAgent
-from agents.risk_manager import RiskManager, RiskLimits
+from agents.research_policy import MultiAgentResearchPolicy
+from engine.policy import PortfolioSnapshot
 from connectors.tv_datafeed import TradingViewFeed, TVSnapshot
 from connectors.platform import PaperTradingConnector, Balance
 from connectors.historical import HistoricalDataFeed
@@ -77,12 +74,7 @@ def init_feed():
 
 @st.cache_resource(ttl=300)
 def init_agents():
-    return (
-        PredictiveAgent(),
-        ContextAgent(),
-        {s: VolatilityAgent() for s in SYMBOLS},
-        RiskManager(initial_portfolio_value=100000.0),
-    )
+    return {symbol: MultiAgentResearchPolicy(symbol) for symbol in SYMBOLS}
 
 def init_connector():
     return PaperTradingConnector(initial_balance=100000.0, tv_feed=init_feed())
@@ -123,16 +115,19 @@ def fetch_live_data():
 
 def run_agent_pipeline(mds):
     async def _run():
-        pred, ctx, vmap, risk = init_agents()
+        policies = init_agents()
         results = {}
         for sym in SYMBOLS:
             md = mds.get(sym)
             if md:
-                pr = await pred.analyze(md)
-                cr = await ctx.analyze(md)
-                vr = await vmap[sym].analyze(md)
-                dec = await risk.evaluate(prediction=asdict(pr), context=asdict(cr), volatility=asdict(vr), market_data=md)
-                results[sym] = (pr, cr, vr, dec)
+                decision = policies[sym].decide(md, PortfolioSnapshot())
+                outputs = decision.agent_outputs
+                results[sym] = (
+                    outputs.get("prediction", {}),
+                    outputs.get("context", {}),
+                    outputs.get("volatility", {}),
+                    decision,
+                )
         return results
     return _run_async(_run())
 
@@ -185,7 +180,7 @@ def render_agent_panel(results, search_results):
     if sym not in results:
         st.info("No data"); return
     pr, cr, vr, dec = results[sym]
-    pd_, cd, vd, dd = asdict(pr), asdict(cr), asdict(vr), asdict(dec)
+    pd_, cd, vd, dd = pr, cr, vr, asdict(dec)
     sr = search_results.get(sym, {})
 
     c1, c2, c3, c4, c5 = st.columns(5)
@@ -231,7 +226,11 @@ def render_agent_panel(results, search_results):
         with t1: st.json(pd_["reasoning"])
         with t2: st.json(cd["reasoning"])
         with t3: st.json(vd["reasoning"])
-        with t4: st.json(dd["reasoning"])
+        with t4: st.json({
+            "signal": dec.signal,
+            "reasons": list(dec.reasons),
+            "agents": dec.agent_outputs,
+        })
         with t5: st.json(sr.get("metrics",{}))
 
 def render_portfolio(balance, connector, searchengine):

@@ -86,6 +86,8 @@ class AllocationDecision:
 
 
 class RiskManager:
+    """Legacy compatibility manager; active policy decisions use the shared trading policy."""
+
     name: str = "risk_manager"
 
     def __init__(self, initial_portfolio_value: float = 100000.0) -> None:

@@ -160,7 +160,9 @@ def test_turnover_and_costs_reduce_net_pnl():
 
     frictionless = run_backtest(
         bars, evaluator,
-        config=WalkForwardConfig(slippage_bps=0.0, commission_pct=0.0),
+        config=WalkForwardConfig(
+            slippage_bps=0.0, spread_bps=0.0, commission_pct=0.0,
+        ),
         start=30, end=80,
     )
     costed = run_backtest(bars, evaluator, start=30, end=80)

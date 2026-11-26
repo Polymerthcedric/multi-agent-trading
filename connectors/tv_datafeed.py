@@ -10,7 +10,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -96,13 +96,13 @@ class TradingViewFeed:
 
     def _detect_backend(self) -> str:
         try:
-            import tradingview_ta
-            return "tradingview"
+            import yfinance
+            return "yfinance"
         except ImportError:
             pass
         try:
-            import yfinance
-            return "yfinance"
+            import tradingview_ta
+            return "tradingview"
         except ImportError:
             pass
         return "unavailable"
@@ -357,7 +357,7 @@ class TradingViewFeed:
     def get_price_history(self, symbol: str) -> List[float]:
         return self._price_history.get(symbol, [])
 
-    def to_market_data(self, symbol: str, snap: Optional[TVSnapshot] = None) -> Dict[str, float]:
+    def to_market_data(self, symbol: str, snap: Optional[TVSnapshot] = None) -> Dict[str, Any]:
         if snap is None:
             snap = self._cache.get(symbol)
             if snap is None:
@@ -371,4 +371,8 @@ class TradingViewFeed:
             "change_pct": snap.change_pct, "momentum": snap.momentum, "atr": snap.atr,
             "recommendation": snap.recommendation, "buy_signals": snap.buy_signals,
             "sell_signals": snap.sell_signals,
+            "timestamp": snap.timestamp,
+            "is_stale": snap.is_stale,
+            "staleness_seconds": snap.staleness_seconds,
+            "data_quality_ok": not snap.is_stale,
         }

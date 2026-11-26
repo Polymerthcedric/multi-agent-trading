@@ -10,6 +10,7 @@ import pytest
 
 from agents.decision_log import DecisionRecord
 from agents.portfolio_risk import PortfolioRiskMonitor
+from engine.policy import PolicyDecision
 
 try:
     import main as main_module
@@ -198,7 +199,7 @@ def test_new_long_gate_rejects_denied_position_and_logs_reasons(caplog):
     assert "concentrated_correlated_exposure" in caplog.text
 
 
-def test_new_long_gate_checks_additions_and_fails_open(caplog):
+def test_new_long_gate_checks_additions_and_fails_closed(caplog):
     if main_module is None:
         pytest.skip(f"main.py imports unavailable: {MAIN_IMPORT_ERROR}")
 
@@ -215,21 +216,16 @@ def test_new_long_gate_checks_additions_and_fails_open(caplog):
     assert monitor.calls == 1
     assert decision_log.updates == [("GOLD/USD", "rejected")]
 
-    # A monitor bug must never stop trading (fail open, but logged).
+    # A monitor failure blocks new risk instead of failing open.
     orch.portfolio_risk = _FakeMonitor(error=RuntimeError("monitor bug"))
-    assert orch._reject_new_long_if_risky("GOLD/USD", balance) is False
+    assert orch._reject_new_long_if_risky("GOLD/USD", balance) is True
     assert "monitor bug" in caplog.text
+    assert decision_log.updates[-1] == ("GOLD/USD", "rejected")
 
 
 def test_sell_execution_never_calls_portfolio_gate():
     if main_module is None:
         pytest.skip(f"main.py imports unavailable: {MAIN_IMPORT_ERROR}")
-
-    from dataclasses import dataclass
-
-    @dataclass
-    class _Prediction:
-        confidence: float = 0.8
 
     class _Connector:
         async def get_balance(self):
@@ -241,7 +237,10 @@ def test_sell_execution_never_calls_portfolio_gate():
 
         async def execute_action(self, **kwargs):
             self.actions.append(kwargs["action"])
-            return SimpleNamespace(status="filled", avg_fill_price=100.0, filled_quantity=1.0)
+            return SimpleNamespace(
+                status="filled", avg_fill_price=100.0,
+                filled_quantity=1.0, commission=0.0,
+            )
 
     class _Environment:
         portfolio_value = 100_000.0
@@ -257,7 +256,7 @@ def test_sell_execution_never_calls_portfolio_gate():
             pass
 
     class _TradeLedger:
-        def close_trade(self, symbol, price):
+        def close_trade(self, symbol, price, *, exit_fee=0.0):
             return None
 
     monitor = _FakeMonitor(SimpleNamespace(
@@ -272,30 +271,35 @@ def test_sell_execution_never_calls_portfolio_gate():
     orch.broker = broker
     orch.decision_log = _FakeDecisionLog()
     orch.environments = {"GOLD/USD": _Environment()}
-    orch.risk = SimpleNamespace(update_portfolio_value=lambda value: None)
     orch.runtime_ledger = _Ledger()
     orch.trade_ledger = _TradeLedger()
     orch._trade_count = 0
+    orch._daily_trade_count = 0
+    orch._risk_day_key = ""
+    orch._risk_week_key = ""
+    orch._equity_peak = 100_000.0
+    orch._day_start_equity = 100_000.0
+    orch._week_start_equity = 100_000.0
+    orch._active_stops = {}
     sync_calls = []
 
     async def _fake_sync(*args, **kwargs):
         sync_calls.append((args, kwargs))
 
     orch._sync_portfolio_risk = _fake_sync
-    original_asdict = main_module.asdict
-    main_module.asdict = lambda value: {}
-    try:
-        asyncio.run(orch._execute_trade(
-            symbol="GOLD/USD",
-            action_label="SELL",
-            allocation_pct=0.1,
-            price=100.0,
-            prediction=_Prediction(),
-            context=SimpleNamespace(),
-            volatility=SimpleNamespace(atr=1.0, z_score=0.0),
-        ))
-    finally:
-        main_module.asdict = original_asdict
+    asyncio.run(orch._execute_trade(
+        symbol="GOLD/USD",
+        decision=PolicyDecision(
+            action="SELL",
+            allocation_pct=1.0,
+            agent_outputs={
+                "prediction": {"confidence": 0.8},
+                "context": {},
+                "volatility": {"atr": 1.0, "z_score": 0.0},
+            },
+        ),
+        market_data={"price": 100.0},
+    ))
 
     assert broker.actions == [2]
     assert monitor.calls == 0

@@ -117,8 +117,8 @@ class PortfolioRiskAssessment:
 class PortfolioRiskMonitor:
     """Cross-asset correlation tracker and portfolio risk aggregator.
 
-    Designed to be held as a singleton alongside the ``RiskManager`` and
-    queried before every new position is opened.
+    Designed to be held as a singleton alongside the shared trading policy
+    and queried before every new position is opened.
     """
 
     def __init__(

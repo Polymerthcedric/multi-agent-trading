@@ -18,12 +18,13 @@ class Settings:
             f"exchange_passphrase='***', paper_trading={self.paper_trading}, "
             f"log_level='{self.log_level}', log_file='{self.log_file}', "
             f"simulation_tick_interval_sec={self.simulation_tick_interval_sec}, "
-            f"max_daily_trades={self.max_daily_trades}, "
             f"symbols={self.symbols}, "
-            f"max_daily_drawdown_pct={self.max_daily_drawdown_pct}, "
             f"max_position_size_pct={self.max_position_size_pct}, "
             f"max_risk_per_trade_pct={self.max_risk_per_trade_pct}, "
-            f"learning_cadence_trades={self.learning_cadence_trades})"
+            f"max_daily_loss_pct={self.max_daily_loss_pct}, "
+            f"max_weekly_loss_pct={self.max_weekly_loss_pct}, "
+            f"max_drawdown_halt_pct={self.max_drawdown_halt_pct}, "
+            f"max_trades_per_day={self.max_trades_per_day})"
         )
 
     paper_trading: bool = True
@@ -31,7 +32,6 @@ class Settings:
     log_file: str = "trading_bot.log"
 
     simulation_tick_interval_sec: float = 1.0
-    max_daily_trades: int = 20
 
     symbols: Tuple[str, ...] = field(default_factory=lambda: (
         "GOLD/USD", "SILVER/USD",
@@ -40,10 +40,8 @@ class Settings:
         "SPY", "QQQ",
     ))
 
-    max_daily_drawdown_pct: float = 0.03
     max_position_size_pct: float = 0.20
     max_risk_per_trade_pct: float = 0.015
-    learning_cadence_trades: int = 25
 
     max_daily_loss_pct: float = 0.03
     max_weekly_loss_pct: float = 0.05

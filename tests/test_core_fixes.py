@@ -10,12 +10,16 @@ import math
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 sys.path.insert(0, ".")
 
 from agents.debate import BullBearDebate
 from agents.risk_manager import RiskManager
 from connectors.platform import MIN_QUANTITY, PaperTradingConnector
+from connectors.tv_datafeed import DataUnavailableError
 from execution.broker import Broker
+from memory.feedback_loop import TradeLedger, TradeRecord
 
 
 class FixedFeed:
@@ -109,7 +113,23 @@ def test_paper_rejects_invalid_price():
     connector = PaperTradingConnector(tv_feed=FixedFeed(0.0))
     result = asyncio.run(connector.execute_order("BTC/USD", "buy", 1.0))
     assert result.status == "rejected"
-    assert "invalid fill price" in (result.error or "")
+    assert "Market-data price is invalid" in (result.error or "")
+
+
+def test_paper_market_data_without_a_feed_fails_closed():
+    connector = PaperTradingConnector()
+    with pytest.raises(DataUnavailableError, match="No market-data feed"):
+        asyncio.run(connector.get_market_data("AAPL"))
+
+
+def test_paper_market_data_rejects_stale_feed():
+    class StaleFeed(FixedFeed):
+        async def get_snapshot(self, symbol: str):
+            return SimpleNamespace(price=self.price, is_stale=True)
+
+    connector = PaperTradingConnector(tv_feed=StaleFeed(100.0))
+    with pytest.raises(DataUnavailableError, match="Fresh market data unavailable"):
+        asyncio.run(connector.get_market_data("AAPL"))
 
 
 def test_paper_buy_is_limited_by_available_cash():
@@ -158,3 +178,43 @@ def test_broker_max_order_size_caps_notional_not_units():
     ))
     assert result is not None and result.status == "filled"
     assert math.isclose(result.filled_quantity, 10.0, rel_tol=0.02)
+
+
+def test_broker_applies_its_cost_model_to_the_actual_paper_fill():
+    connector = PaperTradingConnector(initial_balance=100_000.0, tv_feed=FixedFeed(100.0))
+    broker = Broker(connector)
+    estimated = broker.estimate_fill_price("buy", 100.0)
+
+    result = asyncio.run(broker.execute_action(
+        action=1,
+        symbol="AAPL",
+        price=100.0,
+        allocation_pct=0.1,
+        portfolio_value=100_000.0,
+    ))
+
+    assert result is not None and result.status == "filled"
+    assert result.avg_fill_price == estimated.fill_price
+    assert result.commission > 0
+    balance = asyncio.run(connector.get_balance())
+    assert balance.cash == pytest.approx(
+        100_000.0 - result.filled_quantity * result.avg_fill_price - result.commission,
+    )
+
+
+def test_trade_ledger_pnl_includes_entry_and_exit_commissions(tmp_path):
+    ledger = TradeLedger(str(tmp_path / "trades.json"))
+    trade = TradeRecord(
+        symbol="AAPL",
+        direction="BUY",
+        entry_price=100.0,
+        quantity=2.0,
+        entry_fee=1.0,
+    )
+    ledger.record_trade(trade)
+
+    closed = ledger.close_trade("AAPL", 110.0, exit_fee=1.0)
+
+    assert closed is trade
+    assert trade.pnl == pytest.approx(18.0)
+    assert trade.pnl_pct == pytest.approx(18.0 / 201.0)

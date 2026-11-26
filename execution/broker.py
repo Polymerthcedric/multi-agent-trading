@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple
 
@@ -58,7 +59,7 @@ class Broker:
         else:
             fill_price = price * (1.0 - cons.slippage_bps / 10000.0 - cons.spread_bps / 20000.0)
         slip_cost = abs(fill_price - price)
-        spread_cost = price * cons.spread_bps / 10000.0
+        spread_cost = price * cons.spread_bps / 20000.0
         comm_cost = price * cons.commission_pct
         total_cost = slip_cost + spread_cost + comm_cost
         total_pct = total_cost / price if price > 0 else 0.0
@@ -72,20 +73,27 @@ class Broker:
             net_price=round(fill_price + (comm_cost if side == "buy" else -comm_cost), 8),
         )
 
-    def risk_adjusted_quantity(self, side: str, price: float, allocation_pct: float, portfolio_value: float, max_risk_per_trade: float) -> Tuple[float, float, FilledCostBreakdown]:
+    def order_quantity(
+        self,
+        side: str,
+        price: float,
+        allocation_pct: float,
+        portfolio_value: float,
+    ) -> Tuple[float, float, FilledCostBreakdown]:
         cost_breakdown = self.estimate_fill_price(side, price)
         fill_price = cost_breakdown.fill_price
-        theoretical_notional = portfolio_value * allocation_pct
-        raw_qty = theoretical_notional / price if price > 0 else 0.0
-        fill_notional = raw_qty * fill_price
-        actual_risk = fill_notional * cost_breakdown.total_cost_pct
-        max_risk_notional = portfolio_value * max_risk_per_trade
-        if actual_risk > max_risk_notional and actual_risk > 0:
-            risk_scale = max_risk_notional / actual_risk
-            raw_qty *= risk_scale
-        max_notional = portfolio_value * self.constraints.max_order_size
-        qty_cap = max_notional / fill_price if fill_price > 0 else 0.0
-        raw_qty = min(raw_qty, qty_cap)
+        if (
+            not math.isfinite(price) or price <= 0
+            or not math.isfinite(allocation_pct) or allocation_pct <= 0
+            or not math.isfinite(portfolio_value) or portfolio_value <= 0
+        ):
+            return 0.0, fill_price, cost_breakdown
+        target_notional = portfolio_value * allocation_pct
+        order_cap = self.constraints.max_order_size
+        if side == "buy":
+            order_cap = min(order_cap, self.constraints.max_position_pct)
+        max_notional = portfolio_value * order_cap
+        raw_qty = min(target_notional, max_notional) / fill_price if fill_price > 0 else 0.0
         return raw_qty, fill_price, cost_breakdown
 
     async def execute_action(
@@ -95,17 +103,25 @@ class Broker:
         price: float,
         allocation_pct: float,
         portfolio_value: float,
-        max_risk_per_trade: float = 0.02,
     ) -> Optional[OrderResult]:
         label = ACTION_MAP.get(action, "HOLD")
         if label == "HOLD":
             return None
         side = "buy" if label == "BUY" else "sell"
-        quantity, fill_price, cost = self.risk_adjusted_quantity(side, price, allocation_pct, portfolio_value, max_risk_per_trade)
+        quantity, fill_price, cost = self.order_quantity(
+            side, price, allocation_pct, portfolio_value,
+        )
         if quantity <= 0:
-            logger.warning("Broker | quantity <= 0 after risk adjustment -> HOLD")
+            logger.warning("Broker | quantity <= 0 after notional limits -> HOLD")
             return None
-        result = await self.connector.execute_order(symbol, side, quantity)
+        result = await self.connector.execute_order(
+            symbol,
+            side,
+            quantity,
+            reference_price=price,
+            fill_price=fill_price,
+            commission_pct=self.constraints.commission_pct,
+        )
         logger.info(
             "Broker | %s %s %.6f theo=%.2f fill=%.2f cost=%.4f%% slippage=%.2fbps spread=%.2fbps comm=%.4f%% | status=%s",
             side, symbol, quantity, price, fill_price,

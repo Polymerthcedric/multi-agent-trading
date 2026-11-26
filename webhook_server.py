@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import sys
@@ -8,66 +7,19 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from connectors.webhooks.receiver import app, signal_store, register_trading_callback
+from connectors.webhooks.receiver import app, register_trading_callback
 from config.settings import Settings
 
 logger = logging.getLogger(__name__)
 
 
 async def process_tv_signal(signal):
-    logger.info("Processing TV signal: %s %s @ %.2f", signal.action, signal.symbol, signal.price)
-
-    from agents.predictive import PredictiveAgent
-    from agents.context import ContextAgent
-    from agents.volatility import VolatilityAgent
-    from agents.risk_manager import RiskManager
-    from dataclasses import asdict
-
-    predictive = PredictiveAgent()
-    context = ContextAgent()
-    volatility = VolatilityAgent()
-    risk = RiskManager()
-
-    market_data = {
-        "symbol": signal.symbol,
-        "price": signal.price,
-        "sma": signal.price,
-        "ema": signal.price,
-        "rsi": 50.0,
-        "high": signal.price * 1.01,
-        "low": signal.price * 0.99,
-        "historical_support": signal.stop_loss if signal.stop_loss > 0 else signal.price * 0.97,
-        "historical_resistance": signal.take_profit if signal.take_profit > 0 else signal.price * 1.03,
-        "volume": signal.volume,
-        "adx": 0.0,
-        "macd": 0.0,
-        "macd_signal": 0.0,
-        "bb_upper": signal.price * 1.05,
-        "bb_lower": signal.price * 0.95,
-        "atr": signal.price * 0.01,
-        "momentum": 0.0,
-    }
-
-    prediction = await predictive.analyze(market_data)
-    context_result = await context.analyze(market_data)
-    volatility_result = await volatility.analyze(market_data)
-
-    decision = await risk.evaluate(
-        prediction=asdict(prediction),
-        context=asdict(context_result),
-        volatility=asdict(volatility_result),
-        market_data=market_data,
-    )
-
     logger.info(
-        "Agent analysis for %s: pred=%s/%.2f ctx=%s vol=%s -> risk=%s",
-        signal.symbol, prediction.direction, prediction.confidence,
-        context_result.signal_alignment, volatility_result.volatility_regime,
-        decision.action,
+        "External signal received: %s %s @ %.2f; observation only, no order submitted",
+        signal.action,
+        signal.symbol,
+        signal.price,
     )
-
-    if decision.action != "HOLD":
-        logger.info("EXECUTE: %s %s (alloc=%.2f%%)", decision.action, signal.symbol, decision.allocation_pct * 100)
 
 
 register_trading_callback(process_tv_signal)
